@@ -1,0 +1,7 @@
+The emulator is used as the reference design when you are testing your processor core. Since you are an AI agent, it might not be convenient for you to use it interactively, so you can figure out an AI's way of using an emulator. I suggest that, instead of using a gdb like purely interactive command line, it might be better for the emulator to behave like a shell. It can be used by human interactively, but can also run a script from file or command line. It may support commands like loading a program and starting fresh, loading or saving a checkpoint, printing some architecure states, controlling logging and tracing, etc.
+
+Also, I suggest writing the emulator in C++. Verilator's API is in C++, so C++ is the natural choice. And, you can implement your emulator, your adaptor of the simulated RTL design, and the differential tesing controller as sub-classes of the same abstract class, so logging, debugging and interaction logics can be reused. You may also write a wrapper or adaptor of spike emulator as its sub-class, so you can use spike as a reference to differential test your emulator.
+
+You may add a virtual UART at memory address 0x10000000. You may want it to be able to read from a file or specify the input sequence of it using an emulator command, so it is convenient to be used by an AI. The virtual UART do not need to be as complicated as a real one.
+
+For the emulator, you can use a single continuous RWX address space as the memory. But since the processor core is using AXI, you need to figure out a way to emulate the memory for it.
