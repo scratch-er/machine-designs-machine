@@ -6,6 +6,10 @@
 - `tools/*` are workspace members; dependencies resolve into one root `.venv`.
 - `semantic-search` is the only tool so far.
 - Full spec index exists at `data/semantic-search/index.db`.
+- Emulator design written in `notes/emulator-design.md`.
+- Difftest design written in `notes/difftest-design.md`.
+- Core design written in `notes/core-design.md`.
+- Overall plan updated in `notes/plan.md`.
 
 ## Reminders for future work
 
@@ -17,5 +21,8 @@
 
 ## Pending tasks
 
-- Use the `semantic-search` skill to answer ISA questions while designing the
-  emulator and processor core.
+- Set up the emulator build system in `emulator/`.
+- Implement the decoder and basic RV32E interpreter.
+- Add memory, CLINT, UART, and shell.
+- Create a small assembly workload and run it on the emulator.
+- Then begin the processor core.

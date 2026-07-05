@@ -1,0 +1,408 @@
+# Emulator Design Notes
+
+## Purpose
+
+The emulator is the reference model for differential testing of the RISC-V processor core. It must be:
+
+1. **Correct**: strictly follow the RV32E_Zicsr specification as defined in `specs/core.md`.
+2. **Observable**: expose enough architectural state and events to compare against RTL.
+3. **Scriptable**: run interactively like a shell, but also execute command scripts for automated testing.
+4. **Extensible**: share a common interface with an optional Verilator backend.
+
+The Spike adapter is explicitly deferred: first cross-check the emulator against itself, then against RTL, and only add Spike if we need an independent third opinion later.
+
+## Directory Layout
+
+```
+emulator/
+├── CMakeLists.txt          # build configuration
+├── include/
+│   └── emulator/
+│       ├── common.h        # types, constants, helpers
+│       ├── config.h        # runtime configuration (reset vector, CLINT base, ...)
+│       ├── iss.h           # abstract ISS interface
+│       ├── commit.h        # commit event definition
+│       ├── hart.h          # architectural state (regs, pc, csrs)
+│       ├── emulator_iss.h  # software interpreter
+│       ├── decoder.h       # instruction decoder
+│       ├── memory.h        # flat memory model
+│       ├── clint.h         # built-in timer model
+│       ├── uart.h          # virtual UART
+│       ├── shell.h         # interactive/scripted command loop
+│       ├── trace.h         # logging infrastructure
+│       └── difftest.h      # differential test harness
+├── src/
+│   ├── config.cpp          # default config and CLI overrides
+│   ├── hart.cpp            # GPR/CSR read/write helpers
+│   ├── decoder.cpp         # decode table
+│   ├── emulator_iss.cpp    # interpreter
+│   ├── memory.cpp          # sparse memory backend
+│   ├── clint.cpp           # mtime/mtimeh update
+│   ├── uart.cpp            # UART I/O
+│   ├── shell.cpp           # command parser and execution
+│   ├── trace.cpp           # trace formatting
+│   ├── difftest.cpp        # compare commit events
+│   └── main.cpp            # entry point
+└── tests/
+    └── ...                 # unit tests for decoder, memory, etc.
+```
+
+## Configuration
+
+A `Config` object holds all parameters that must match between the emulator and the RTL:
+
+| Parameter              | Default       | Description                                      |
+|------------------------|---------------|--------------------------------------------------|
+| `reset_vector`         | `0x20000000`  | PC after reset                                   |
+| `clint_base`           | `0x02000000`  | CLINT memory-map base                            |
+| `clint_size`           | `0x00010000`  | CLINT memory-map size                            |
+| `uart_base`            | `0x10000000`  | Virtual UART base address                        |
+| `ram_base`             | `0x20000000`  | Start of default RAM region                      |
+| `ram_size`             | `0x00100000`  | Default RAM size (1 MiB)                         |
+| `strict_mem`           | `false`       | Treat unmapped data accesses as faults           |
+| `commit_timeout_cycles`| `10000`       | Max cycles `RtlISS` waits for a commit           |
+
+The CLI parses flags such as `--reset-vector`, `--clint-base`, `--uart-base`, and `--strict-mem`. Both the emulator and the RTL testbench read the same config file or command line so they stay synchronized.
+
+## Abstract ISS Interface
+
+All execution engines derive from `ISS`:
+
+```cpp
+class ISS {
+public:
+    virtual ~ISS() = default;
+
+    // Reset. Default reset vector matches specs/core.md.
+    virtual void reset(uint32_t reset_addr = 0x20000000) = 0;
+
+    // Advance one clock cycle. For the software interpreter this means
+    // execute exactly one instruction and increment the cycle counter by 1.
+    // For the RTL adapter this ticks Verilator once.
+    virtual bool step_cycle() = 0;
+
+    // Advance until one instruction retires (or an exception is taken).
+    // Returns true on success and fills `out`.
+    // Returns false if the machine halted or no commit appears within a limit.
+    virtual bool step_inst(CommitEvent& out) = 0;
+
+    // Architectural state queries.
+    virtual uint32_t pc() const = 0;
+    virtual uint32_t reg(uint32_t idx) const = 0;
+    virtual uint32_t csr(uint32_t addr) const = 0;
+
+    // Memory access used by the shell and tests, not by the interpreter loop.
+    virtual uint32_t read_mem(uint32_t addr, uint32_t size) = 0;
+    virtual void write_mem(uint32_t addr, uint32_t size, uint32_t data) = 0;
+
+    // Program loading.
+    virtual bool load_bin(const std::string& path, uint32_t addr) = 0;
+    virtual bool load_elf(const std::string& path) = 0;
+
+    // Checkpointing.
+    virtual bool save_checkpoint(const std::string& path) = 0;
+    virtual bool load_checkpoint(const std::string& path) = 0;
+
+    // Logging.
+    virtual void set_log_level(int level) = 0;
+};
+```
+
+`CommitEvent` fields:
+
+- `cycle` — cycle count at retirement
+- `pc` — address of the retired instruction
+- `inst` — raw 32-bit instruction (undefined when `exception` is true)
+- `rd` — destination register index (0 if none)
+- `rd_value` — value written to `rd`
+- `exception` — true if this commit was an exception
+- `cause` — `mcause` value when `exception` is true
+- `next_pc` — PC after this commit
+
+Why `step_inst()` returns the event instead of a separate `next_commit()` pull: it makes the adapter state machine explicit and avoids the awkward "event already consumed" problem. The RTL adapter internally runs `step_cycle()` until a commit signal is observed, then populates `CommitEvent`.
+
+## Architectural State (`Hart`)
+
+Encapsulate the ISA-visible state in a `Hart` object:
+
+- `uint32_t pc`
+- `uint32_t x[16]` (RV32E)
+- CSRs: `mstatus`, `mepc`, `mtvec`, `mcause`, plus read-only `mvendorid`/`marchid`
+- `bool halted` — set when an `ebreak` test-finish marker is encountered or on an unrecoverable fault.
+
+`Hart` provides:
+
+- `read_reg(idx)`, `write_reg(idx, value)` (x0 is hardwired zero)
+- `read_csr(addr)`, `write_csr(addr, value)` with illegal-CSR exception handling
+- `take_exception(cause, tval)` — sets `mepc`, `mcause`, jumps to `mtvec`
+- `serialize()` / `deserialize()` for checkpoints
+
+This separation lets the RTL adapter build a `Hart` from Verilator signals for comparison without running the interpreter.
+
+## Decoder
+
+### Instruction encoding table
+
+A single table of entries `(mask, match, InstType)` covers all 32-bit encodings. Compressed instructions are not part of RV32E_Zicsr unless explicitly enabled later, so the table only handles 32-bit instructions.
+
+Example entry shape:
+
+```cpp
+struct DecodeEntry {
+    uint32_t mask;
+    uint32_t match;
+    InstType type;
+};
+```
+
+The decoder iterates the table and returns the first matching `InstType`, then extracts fields with helper functions (`rd`, `rs1`, `rs2`, `funct3`, `imm_i`, etc.).
+
+### RV32E instruction coverage
+
+The emulator must implement the following RV32E instructions:
+
+**Integer computational**
+- `lui`, `auipc`
+- `addi`, `slti`, `sltiu`, `xori`, `ori`, `andi`, `slli`, `srli`, `srai`
+- `add`, `sub`, `sll`, `slt`, `sltu`, `xor`, `srl`, `sra`, `or`, `and`
+
+**Control transfer**
+- `jal`, `jalr`
+- `beq`, `bne`, `blt`, `bge`, `bltu`, `bgeu`
+
+**Load/Store**
+- `lb`, `lh`, `lw`, `lbu`, `lhu`
+- `sb`, `sh`, `sw`
+
+**Privileged / synchronization**
+- `ecall`, `ebreak`, `mret`, `wfi`
+- `fence`, `fence.i`
+
+**CSR**
+- `csrrw`, `csrrs`, `csrrc`, `csrrwi`, `csrrsi`, `csrrci`
+
+Any instruction outside this set, including all AMO and compressed instructions, is illegal in RV32E and raises an illegal-instruction exception.
+
+### RV32E specifics
+
+- Only `x0`–`x15` are valid.
+- Writes to `x0` are ignored; reads return 0.
+- Any instruction whose `rd`, `rs1`, or `rs2` field names `x16`–`x31` raises illegal-instruction exception. This includes encodings that would otherwise be legal in RV32I.
+
+## CSR Handling
+
+Implemented CSRs:
+
+| CSR       | Address | Behavior                                              |
+|-----------|---------|-------------------------------------------------------|
+| mvendorid | 0xF11   | hardcoded 0                                           |
+| marchid   | 0xF12   | hardcoded 0                                           |
+| mstatus   | 0x300   | MPP hardcoded to M-mode, all other bits 0             |
+| mepc      | 0x341   | holds 32-bit addresses, low two bits masked on write  |
+| mtvec     | 0x305   | holds 32-bit addresses, low two bits masked on write  |
+| mcause    | 0x342   | exception cause; written by exception path            |
+
+Any other CSR access raises an illegal-instruction exception.
+
+CSR instructions (`csrrw`, `csrrs`, `csrrc`, and their immediate variants) must handle the read-before-write even when `rd` is `x0`, because the read can still raise an illegal-instruction exception for unimplemented CSRs.
+
+## Exception Priorities and Causes
+
+Per RISC-V spec, the priority order for the implemented exceptions is:
+
+| Priority | Exception                        | `mcause` |
+|----------|----------------------------------|----------|
+| 1        | Instruction address misaligned   | 0        |
+| 2        | Instruction access fault         | 1        |
+| 3        | Illegal instruction              | 2        |
+| 4        | Breakpoint                       | 3        |
+| 5        | Load address misaligned          | 4        |
+| 6        | Load access fault                | 5        |
+| 7        | Store/AMO address misaligned     | 6        |
+| 8        | Store/AMO access fault           | 7        |
+| 9        | Environment call from M-mode     | 11       |
+
+The "AMO" naming is historical; RV32E does not implement atomic instructions, so only store faults use cause 6/7.
+
+The emulator checks fetch alignment and access first, then decodes, then executes. Load/store faults are detected inside the memory access routine.
+
+## Privileged Instructions
+
+- `ecall`: raises an Environment call from M-mode exception (`mcause` = 11). This is available for workloads that use it as a system call; it does **not** terminate the emulator.
+- `ebreak`: raises a Breakpoint exception (`mcause` = 3). The test harness treats an `ebreak` commit as the test-finish marker and inspects the UART output or `a0` to determine pass/fail. The emulator itself records the exception normally and sets `Hart::halted`.
+- `mret`: returns to `mepc`.
+- `wfi`: NOP.
+- `fence`: NOP.
+- `fence.i`: NOP in the software emulator (the RTL will flush its i-cache).
+
+## Memory Model
+
+### Sparse page storage
+
+Page-based allocation:
+
+- Page size: 4096 bytes.
+- `std::unordered_map<uint32_t, std::vector<uint8_t>>` or `std::map` from page index to page.
+- Lazy allocation on write. Reads from unallocated pages return 0.
+
+### Access rules
+
+- Widths: 1, 2, 4 bytes.
+- Address must be aligned to width; otherwise raise the corresponding misaligned fault.
+- Little-endian byte order.
+- MMIO regions override the RAM path.
+
+### Memory-mapped regions
+
+| Region        | Base                  | Size      | Notes                                      |
+|---------------|-----------------------|-----------|--------------------------------------------|
+| CLINT         | `clint_base`          | 0x10000   | `mtime` (+0xBFF8), `mtimeh` (+0xBFFC)      |
+| UART          | `uart_base`           | 4 bytes   | TX/RX at offset 0, little-endian           |
+| RAM           | `ram_base` (default)  | variable  | default reset vector 0x20000000            |
+
+CLINT offsets are fixed relative to `clint_base`. With the default base:
+- `mtime`  at `0x0200BFF8`
+- `mtimeh` at `0x0200BFFC`
+
+### Access-fault policy
+
+Because the spec says PMP/PMA are unsupported and the address space is open, the emulator default is:
+
+- Instruction fetch from an unmapped page: instruction access fault.
+- Data read from an unmapped page: returns 0 (open address space).
+- Data write to an unmapped page: allocates a page.
+
+A `--strict-mem` option may be added later to turn unmapped data accesses into load/store access faults for debugging, but the default matches the "open" intent.
+
+### CLINT and cycle counting
+
+The CLINT `mtime`/`mtimeh` registers increment by 1 each cycle. In the software interpreter one `step_cycle()` executes one instruction and increments the cycle counter by 1. This gives the reference a simple 1-IPC timing model.
+
+**Important timing note:** when the RTL core is pipelined, its cycle count for the same dynamic instruction sequence will differ from the reference. Programs that read `mtime` will therefore observe different values. For correctness difftest, avoid workloads that depend on exact `mtime` values. When we need timing-aware tests, the difftest harness can share a single `Clock` object between reference and RTL so both read the same `mtime`. See `notes/difftest-design.md` for the shared-clock design.
+
+### Virtual UART
+
+Minimal byte channel:
+
+- Write to offset 0: byte appended to an output buffer (flushed to stdout or file).
+- Read from offset 0: returns the next byte from the configured input sequence, or `0xFF` when empty.
+- No status/control registers; blocking reads/writes are sufficient for test programs.
+- Input can be set from a file or a hex string via the shell.
+
+## Shell
+
+### Commands
+
+| Command                         | Description                                  |
+|---------------------------------|----------------------------------------------|
+| `load <file> [addr]`            | load raw binary at address                   |
+| `load_elf <file>`               | load ELF and use its segments/entry          |
+| `reset [addr]`                  | reset CPU; default reset vector              |
+| `step [n]`                      | execute n instructions (default 1)           |
+| `cycle [n]`                     | run n clock cycles (for RTL adapter)         |
+| `run [n]`                       | run until n instructions retire or stop      |
+| `print pc`                      | show PC                                      |
+| `print reg [i]`                 | show register(s)                             |
+| `print csr [addr]`              | show CSR(s)                                  |
+| `print mem <addr> <size>`       | show memory bytes                            |
+| `checkpoint save <file>`        | save state to file                           |
+| `checkpoint load <file>`        | restore state from file                      |
+| `uart input <file|hex>`         | set UART input source                        |
+| `uart output <file>`            | set UART output sink                         |
+| `log <level>`                   | set log level (0=quiet, 1=inst, 2=bus)       |
+| `exit`                          | quit                                         |
+
+### Command parsing
+
+- Semicolon-separated commands.
+- `#` starts a comment.
+- Simple whitespace tokenization; quoted strings are not required for file paths that do not contain spaces.
+
+### Usage modes
+
+Interactive:
+
+```
+$ ./emulator
+> load firmware.bin 0x20000000
+> run
+> print reg 10
+> exit
+```
+
+Scripted:
+
+```
+$ ./emulator -f script.txt
+```
+
+Single command:
+
+```
+$ ./emulator -e "load firmware.bin 0x20000000; run; exit"
+```
+
+## Tracing
+
+Log levels:
+
+- `0`: errors and final summary only.
+- `1`: instruction retirement stream.
+- `2`: register writes, branches, exceptions.
+- `3`: memory and bus transactions.
+- `4`: decoder details and internal state.
+
+Default trace line format:
+
+```
+R=<retire_idx> C=<cycle> PC=<pc> I=<inst> RD=<rd> RV=<value> NPC=<next_pc> EXC=<exc> CAUSE=<cause>
+```
+
+`R=<retire_idx>` is a monotonically increasing retirement index. It is the same for both models when running the same workload, so it is the primary key for cross-model trace comparison. `C=<cycle>` is model-specific (instruction count for the emulator, Verilator cycle for RTL) and is kept for debugging but is not compared directly.
+
+Trace output is line-oriented so it can be diffed with RTL trace logs.
+
+## Differential Testing
+
+The difftest harness is described in `notes/difftest-design.md`. The emulator side is simple: `step_inst()` executes one instruction and returns a `CommitEvent` with `cycle` equal to the internal cycle counter. Because the software interpreter is 1-IPC, `cycle` equals the number of retired instructions.
+
+## Checkpoint Format
+
+Binary format for compactness:
+
+- Magic bytes (`AIEM`) and version (4 bytes each).
+- `Config` snapshot (reset vector, CLINT base, etc.).
+- Cycle count (8 bytes).
+- PC (4 bytes).
+- GPR array (16 x 4 bytes).
+- CSRs (6 x 4 bytes: mvendorid, marchid, mstatus, mepc, mtvec, mcause).
+- Number of memory pages (4 bytes), then each page: index (4 bytes), 4096 bytes.
+- UART input/output state.
+
+A separate `--dump-checkpoint` command can render the binary as human-readable text for debugging.
+
+## Testing Strategy
+
+1. Decoder unit tests: feed known encodings and verify decoded type + fields.
+2. ALU tests: verify each arithmetic/logical instruction result and flag semantics.
+3. Memory tests: aligned access, unaligned faults, byte ordering, MMIO reads.
+4. CSR tests: read/write implemented CSRs, illegal CSR access exception.
+5. Exception tests: misaligned fetch, `ebreak` (test-finish marker / breakpoint), `ecall`, `mret`, illegal instruction.
+6. End-to-end: compile a small C/assembly program, run to UART pass marker.
+7. Difftest self-test: run two `EmulatorISS` instances and confirm they match.
+
+## Build and Tooling
+
+- C++17, CMake >= 3.16.
+- GoogleTest fetched by CMake or vendored under `emulator/third_party/`.
+- Compiler warnings: `-Wall -Wextra -Werror` in release/test builds.
+- A top-level `Makefile` or `justfile` provides convenience targets:
+  - `make build` — configure and build the emulator.
+  - `make test` — run unit tests.
+  - `make run-<test>` — run a workload binary.
+
+## Open Questions / Deferred Decisions
+
+- ELF loader: start with raw binary + explicit address; add ELF loading once C workloads arrive.
+- Spike adapter: deferred until RTL difftest is stable.
+- AXI testbench memory: designed in `notes/difftest-design.md`.
