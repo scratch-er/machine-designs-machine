@@ -237,13 +237,26 @@ The emulator checks fetch alignment and access first, then decodes, then execute
 
 ## Memory Model
 
-### Sparse page storage
+### Flat RAM + MMIO
 
-Page-based allocation:
+The emulator uses a simple flat-RAM model:
 
-- Page size: 4096 bytes.
-- `std::unordered_map<uint32_t, std::vector<uint8_t>>` or `std::map` from page index to page.
-- Lazy allocation on write. Reads from unallocated pages return 0.
+- A single contiguous byte array for the configured RAM region (`ram_base` to `ram_base + ram_size`).
+- RAM size defaults to 1 MiB and is capped at 128 MiB, which is the maximum target memory.
+- MMIO regions (CLINT and UART) are handled by range checks before the RAM access path.
+
+This matches `specs/emulator.md`: “For the emulator, you can use a single continuous RWX address space as the memory.”
+
+### Why not a sparse page model?
+
+A sparse page model (`unordered_map` or tree of pages) is unnecessary for this project because:
+
+1. The target has at most 128 MiB of memory — small enough to allocate directly.
+2. There is no MMU and no need for page-granular protection or lazy allocation.
+3. A flat array gives O(1) access with one bounds check and better cache locality than a hash lookup per access.
+4. Checkpointing is just `fwrite`/`fread` of the RAM vector.
+
+Sparse storage would only make sense if the emulated address space were much larger than physical host memory or if page-granular fault injection were required. Neither applies here.
 
 ### Access rules
 
@@ -258,7 +271,7 @@ Page-based allocation:
 |---------------|-----------------------|-----------|--------------------------------------------|
 | CLINT         | `clint_base`          | 0x10000   | `mtime` (+0xBFF8), `mtimeh` (+0xBFFC)      |
 | UART          | `uart_base`           | 4 bytes   | TX/RX at offset 0, little-endian           |
-| RAM           | `ram_base` (default)  | variable  | default reset vector 0x20000000            |
+| RAM           | `ram_base` (default)  | ≤128 MiB  | default reset vector 0x20000000            |
 
 CLINT offsets are fixed relative to `clint_base`. With the default base:
 - `mtime`  at `0x0200BFF8`
@@ -268,11 +281,11 @@ CLINT offsets are fixed relative to `clint_base`. With the default base:
 
 Because the spec says PMP/PMA are unsupported and the address space is open, the emulator default is:
 
-- Instruction fetch from an unmapped page: instruction access fault.
-- Data read from an unmapped page: returns 0 (open address space).
-- Data write to an unmapped page: allocates a page.
+- Instruction fetch outside RAM: instruction access fault.
+- Data read outside RAM and outside MMIO regions: returns 0 (open address space).
+- Data write outside RAM and outside MMIO regions: ignored (no effect).
 
-A `--strict-mem` option may be added later to turn unmapped data accesses into load/store access faults for debugging, but the default matches the "open" intent.
+A `--strict-mem` option may be added later to turn out-of-range data accesses into load/store access faults for debugging, but the default matches the "open" intent.
 
 ### CLINT and cycle counting
 
@@ -371,12 +384,12 @@ The difftest harness is described in `notes/difftest-design.md`. The emulator si
 Binary format for compactness:
 
 - Magic bytes (`AIEM`) and version (4 bytes each).
-- `Config` snapshot (reset vector, CLINT base, etc.).
+- RAM size `ram_size` (default 1 MiB, max 128 MiB). The byte vector is sized accordingly.
 - Cycle count (8 bytes).
 - PC (4 bytes).
 - GPR array (16 x 4 bytes).
 - CSRs (6 x 4 bytes: mvendorid, marchid, mstatus, mepc, mtvec, mcause).
-- Number of memory pages (4 bytes), then each page: index (4 bytes), 4096 bytes.
+- RAM contents (`ram_size` bytes).
 - UART input/output state.
 
 A separate `--dump-checkpoint` command can render the binary as human-readable text for debugging.
