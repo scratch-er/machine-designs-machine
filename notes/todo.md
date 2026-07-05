@@ -26,7 +26,8 @@
 - [x] Implement the decoder and basic RV32E interpreter.
 - [x] Add memory, CLINT, UART, and shell.
 - [x] Create a small assembly workload and run it on the emulator.
-- [ ] Begin the processor core.
+- [ ] Verify the emulator with more complex workloads before starting the processor core.
+- [x] Write user-facing emulator documentation (README, architecture, workload guide).
 
 ## Recent notes
 
@@ -35,3 +36,4 @@
 - Homebrew LLVM at `/opt/homebrew/Cellar/llvm/22.1.7_1/bin/` is used for RISC-V assembly (`llvm-mc`, `llvm-objcopy`).
 - First workload: `workloads/asm/uart_pass/pass.S` prints "PASS\n" via UART and `ebreak`s.
 - Tests live in `emulator/tests/test_main.cpp` and run with `ctest --test-dir emulator/build`.
+- Git commit `5d6a1cf` added the emulator; binaries and build dirs are ignored.
