@@ -1,3 +1,6 @@
 [submodule "specs/riscv-isa-manual"]
 	path = specs/riscv-isa-manual
 	url = https://github.com/riscv/riscv-isa-manual.git
+[submodule "emulator/riscv-isa-sim"]
+	path = emulator/spike
+	url = https://github.com/riscv-software-src/riscv-isa-sim
