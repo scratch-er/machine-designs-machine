@@ -21,8 +21,17 @@
 
 ## Pending tasks
 
-- Set up the emulator build system in `emulator/`.
-- Implement the decoder and basic RV32E interpreter.
-- Add memory, CLINT, UART, and shell.
-- Create a small assembly workload and run it on the emulator.
-- Then begin the processor core.
+- [x] Compile the complete RV32E_Zicsr instruction list into `notes/instruction-list.md`.
+- [x] Set up the emulator build system in `emulator/`.
+- [x] Implement the decoder and basic RV32E interpreter.
+- [x] Add memory, CLINT, UART, and shell.
+- [x] Create a small assembly workload and run it on the emulator.
+- [ ] Begin the processor core.
+
+## Recent notes
+
+- Emulator builds with CMake in `emulator/build`; use `cmake --build emulator/build -j`.
+- `compile_commands.json` is generated in `emulator/build`.
+- Homebrew LLVM at `/opt/homebrew/Cellar/llvm/22.1.7_1/bin/` is used for RISC-V assembly (`llvm-mc`, `llvm-objcopy`).
+- First workload: `workloads/asm/uart_pass/pass.S` prints "PASS\n" via UART and `ebreak`s.
+- Tests live in `emulator/tests/test_main.cpp` and run with `ctest --test-dir emulator/build`.

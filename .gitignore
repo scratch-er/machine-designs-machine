@@ -3,3 +3,12 @@ data/
 **/.venv/
 __pycache__/
 *.pyc
+**/.cache/
+**/build/
+compile_commands.json
+.agents/
+*.o
+*.elf
+*.d
+*.bin
+workloads/**/*.bin

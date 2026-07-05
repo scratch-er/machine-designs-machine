@@ -7,7 +7,7 @@ Design a RISC-V CPU core (RV32E_Zicsr, M-mode only) and verify it against a refe
 ## Milestones
 
 ### M1 — Reference emulator
-*Completion gate: a C++ emulator can load a RISC-V binary and run it to a UART pass marker.*
+*Completion gate: a C++ emulator can load a RISC-V binary and run it to a UART pass marker.* ✅
 
 - `emulator/` build system with CMake.
 - RV32E_Zicsr decoder and interpreter.
@@ -65,4 +65,4 @@ Design a RISC-V CPU core (RV32E_Zicsr, M-mode only) and verify it against a refe
 
 ## Current Next Step
 
-Set up the emulator build system and implement the decoder/interpreter.
+Verify the emulator with more complex workloads (M2/M3): expand unit tests, run self-checking assembly/C programs, and validate exception paths before moving to the processor core.
