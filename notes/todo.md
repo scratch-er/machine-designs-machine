@@ -53,3 +53,4 @@
   - Runner builds each workload with the `workload-build` skill, runs it in the emulator with a per-test instruction budget, captures UART output, and re-runs failures with instruction tracing.
   - All 16 workloads pass (`./workloads/isa-test/run_tests.sh`).
 - Added `--strict-mem` CLI flag to `emulator/src/main.cpp` so the strict memory-fault mode can be tested from the command line.
+- Wrote `notes/emulator-debugging.md` summarising the lessons from ISA-test debugging and the emulator features needed for real-world program debugging (breakpoints, watchpoints, selective tracing, run-until, snapshots, ring buffer, hang detection).
