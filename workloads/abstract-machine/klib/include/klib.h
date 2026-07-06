@@ -57,6 +57,8 @@ int    tolower   (int c);
 int    toupper   (int c);
 
 // stdio.h
+int    putchar   (int c);
+int    puts      (const char *str);
 int    printf    (const char *format, ...);
 int    vprintf   (const char *fmt, va_list ap);
 int    sprintf   (char *str, const char *format, ...);

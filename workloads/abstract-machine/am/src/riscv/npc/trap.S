@@ -42,6 +42,10 @@ f(30) f(31)
 __am_asm_trap:
   addi sp, sp, -CONTEXT_SIZE
 
+  # Save original sp into ctx->gpr[2]
+  addi t0, sp, CONTEXT_SIZE
+  STORE t0, OFFSET_SP(sp)
+
   MAP(REGS, PUSH)
 
   csrr t0, mcause
@@ -55,6 +59,9 @@ __am_asm_trap:
   mv a0, sp
   call __am_irq_handle
 
+  # a0 = returned Context pointer
+  mv sp, a0
+
   LOAD t1, OFFSET_STATUS(sp)
   LOAD t2, OFFSET_EPC(sp)
   csrw mstatus, t1
@@ -62,5 +69,6 @@ __am_asm_trap:
 
   MAP(REGS, POP)
 
-  addi sp, sp, CONTEXT_SIZE
+  # Restore sp from ctx->gpr[2]
+  LOAD sp, OFFSET_SP(sp)
   mret

@@ -9,6 +9,54 @@
 
 namespace emulator {
 
+// Minimal ELF32 parsing constants.
+static constexpr uint8_t ELFMAG[4] = {0x7f, 'E', 'L', 'F'};
+static constexpr uint8_t ELFCLASS32 = 1;
+static constexpr uint8_t ELFDATA2LSB = 1;
+static constexpr uint16_t ET_EXEC = 2;
+static constexpr uint16_t EM_RISCV = 243;
+static constexpr uint32_t PT_LOAD = 1;
+
+struct Elf32_Ehdr {
+    uint8_t  e_ident[16];
+    uint16_t e_type;
+    uint16_t e_machine;
+    uint32_t e_version;
+    uint32_t e_entry;
+    uint32_t e_phoff;
+    uint32_t e_shoff;
+    uint32_t e_flags;
+    uint16_t e_ehsize;
+    uint16_t e_phentsize;
+    uint16_t e_phnum;
+    uint16_t e_shentsize;
+    uint16_t e_shnum;
+    uint16_t e_shstrndx;
+};
+
+struct Elf32_Phdr {
+    uint32_t p_type;
+    uint32_t p_offset;
+    uint32_t p_vaddr;
+    uint32_t p_paddr;
+    uint32_t p_filesz;
+    uint32_t p_memsz;
+    uint32_t p_flags;
+    uint32_t p_align;
+};
+
+static uint16_t read_u16(const uint8_t* p) {
+    return static_cast<uint16_t>(p[0]) |
+           (static_cast<uint16_t>(p[1]) << 8);
+}
+
+static uint32_t read_u32(const uint8_t* p) {
+    return static_cast<uint32_t>(p[0])        |
+           (static_cast<uint32_t>(p[1]) << 8)  |
+           (static_cast<uint32_t>(p[2]) << 16) |
+           (static_cast<uint32_t>(p[3]) << 24);
+}
+
 EmulatorISS::EmulatorISS(Config cfg)
     : cfg_(std::move(cfg)),
       memory_(cfg_),
@@ -96,9 +144,59 @@ bool EmulatorISS::load_bin(const std::string& path, u32 addr) {
 }
 
 bool EmulatorISS::load_elf(const std::string& path) {
-    (void)path;
-    // ELF loader deferred per plan.
-    return false;
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+
+    std::vector<u8> file((std::istreambuf_iterator<char>(f)),
+                              std::istreambuf_iterator<char>());
+    if (file.size() < sizeof(Elf32_Ehdr)) return false;
+
+    const u8* p = file.data();
+    if (std::memcmp(p, ELFMAG, 4) != 0) return false;
+    if (p[4] != ELFCLASS32 || p[5] != ELFDATA2LSB) return false;
+
+    Elf32_Ehdr ehdr{};
+    ehdr.e_type      = read_u16(p + 16);
+    ehdr.e_machine   = read_u16(p + 18);
+    ehdr.e_version   = read_u32(p + 20);
+    ehdr.e_entry     = read_u32(p + 24);
+    ehdr.e_phoff     = read_u32(p + 28);
+    ehdr.e_shoff     = read_u32(p + 32);
+    ehdr.e_flags     = read_u32(p + 36);
+    ehdr.e_ehsize    = read_u16(p + 40);
+    ehdr.e_phentsize = read_u16(p + 42);
+    ehdr.e_phnum     = read_u16(p + 44);
+
+    if (ehdr.e_type != ET_EXEC) return false;
+    if (ehdr.e_machine != EM_RISCV) return false;
+    if (ehdr.e_phoff == 0 || ehdr.e_phentsize < sizeof(Elf32_Phdr)) return false;
+    if (ehdr.e_phoff + static_cast<u32>(ehdr.e_phnum) * ehdr.e_phentsize > file.size()) return false;
+
+    for (uint16_t i = 0; i < ehdr.e_phnum; ++i) {
+        const u8* ph = file.data() + ehdr.e_phoff + i * ehdr.e_phentsize;
+        Elf32_Phdr phdr{};
+        phdr.p_type   = read_u32(ph + 0);
+        phdr.p_offset = read_u32(ph + 4);
+        phdr.p_vaddr  = read_u32(ph + 8);
+        phdr.p_paddr  = read_u32(ph + 12);
+        phdr.p_filesz = read_u32(ph + 16);
+        phdr.p_memsz  = read_u32(ph + 20);
+
+        if (phdr.p_type != PT_LOAD) continue;
+        if (phdr.p_offset + phdr.p_filesz > file.size()) return false;
+
+        u32 addr = phdr.p_paddr ? phdr.p_paddr : phdr.p_vaddr;
+        if (phdr.p_filesz > 0) {
+            memory_.write_ram(addr, file.data() + phdr.p_offset, phdr.p_filesz);
+        }
+        if (phdr.p_memsz > phdr.p_filesz) {
+            u32 bss_size = phdr.p_memsz - phdr.p_filesz;
+            memory_.fill_ram(addr + phdr.p_filesz, 0, bss_size);
+        }
+    }
+
+    hart_.reset(ehdr.e_entry);
+    return true;
 }
 
 bool EmulatorISS::save_checkpoint(const std::string& path) {

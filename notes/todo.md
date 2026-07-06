@@ -37,17 +37,31 @@
 - [x] Add debugging features: breakpoints, run-until, trace filters, last-N ring buffer, watchdog limits.
 - [x] Implement difftest harness and self-test.
 - [x] Expand unit tests and ISA workloads for exception paths and CSR variants.
+- [x] Port AbstractMachine to `riscv32e-npc` and run AM kernels on the emulator.
+- [x] Replace klib string/stdlib/stdio implementations with sonnet-libc.
 
 ## Next steps
 
 - Begin processor core design (M4): choose microarchitecture, implement single-cycle or pipelined RV32E_Zicsr in Verilog.
 - Use the difftest harness to compare RTL against the emulator (M5).
-- Defer: GoogleTest migration, watchpoints, in-memory snapshots, Spike adapter, ELF loader.
+- Defer: GoogleTest migration, watchpoints, in-memory snapshots, Spike adapter, real AM interrupts, multi-core.
 
 ## Recent notes
 
-- Added debugging features to the emulator: PC breakpoints, `run to`/`run until`, selective trace filters, `last` ring buffer, `dump state`, and `--max-cycles`/`--max-pc-stuck` watchdog flags.
-- Implemented the difftest harness in `emulator/src/difftest.cpp` with a self-test in `emulator/tests/test_main.cpp`.
-- Expanded C++ unit tests to cover decoder formats, RV32E register checks, all ALU/shift/compare instructions, branch/jump misaligned targets, load/store sizes and faults, all CSR instruction variants, and exception priorities.
-- Added ISA workloads: `ecall.S`, `mret.S`, `branch_misaligned.S`, `csr_all.S`, `exception_priority.S`. The suite now has 21 workloads and all pass.
+- Completed AbstractMachine port for `riscv32e-npc`:
+  - Fixed `arch/riscv.h` Context layout to match `trap.S`.
+  - Implemented TRM (`putch` via UART, `halt` via `ebreak`), IOE (UART TX, timer uptime from CLINT `mtime`), CTE (`yield`/`ecall`, `kcontext`), MPE (single-core stubs), VME stubs.
+  - Switched AM build system to Clang/LLVM with configurable toolchain via `data/workload-build/config.sh`.
+  - Aligned AM memory map with the emulator at `0x20000000`.
+- Implemented emulator ELF loader and verified it loads RISC-V ELF32 executables.
+- `workloads/am-kernels/kernels/hello` prints correctly with `make run`.
+- `workloads/am-kernels/kernels/yield-os` successfully context-switches between two threads.
+- Emulator unit tests and ISA test suite (21 tests) still pass.
+- Replaced klib stdio/stdlib/string with implementations adapted from sonnet-libc (https://gitlink.org.cn/foobat/sonnet-libc):
+  - `klib/src/string.c`, `klib/src/stdlib.c`, `klib/src/stdio.c` now use sonnet-libc core code.
+  - Added klib-specific adapters: `calloc`/`realloc`, `strchr`/`strrchr`, `vprintf`, `vsscanf`/`sscanf`/`__isoc99_sscanf`, fixed `vsnprintf` null-termination.
+  - Added `malloc` 8-byte alignment for RISC-V strict alignment.
+  - Added shim headers `klib/include/{stdio.h,stdlib.h,string.h}` so AM kernels can include standard headers.
+  - `klib/include/klib.h` now declares `putchar`/`puts`.
+  - `workloads/am-kernels/kernels/demo` builds and reaches its menu.
 - Updated `notes/emulator-design.md` with the new shell commands, trace filters, and difftest harness.

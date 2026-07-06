@@ -24,11 +24,13 @@ Design a RISC-V CPU core (RV32E_Zicsr, M-mode only) and verify it against a refe
 - Difftest harness comparing two `EmulatorISS` instances.
 
 ### M3 — Workload library
-*Completion gate: a growing suite of self-checking assembly/C tests exists.*
+*Completion gate: AbstractMachine kernels build with Clang/LLVM and run on the emulator.* ✅
 
-- Build rules for `riscv64-unknown-elf-gcc -march=rv32e -mabi=ilp32e`.
-- Standard test ABI: tests write "PASS\n" or "FAIL\n" to UART, then `ebreak`.
-- Tests for every implemented instruction and exception path.
+- Complete `riscv32e-npc` AM port (TRM, IOE, CTE, MPE stubs, VME stubs).
+- Implement klib string/stdlib/stdio functions.
+- Switch AM build system to configurable Clang/LLVM toolchain.
+- Implement emulator ELF loader.
+- Run `hello` and `yield-os` AM kernels successfully.
 
 ### M4 — Processor core
 *Completion gate: RTL implements the spec and builds under Verilator.*
@@ -65,4 +67,4 @@ Design a RISC-V CPU core (RV32E_Zicsr, M-mode only) and verify it against a refe
 
 ## Current Next Step
 
-Verify the emulator with more complex workloads (M2/M3): expand unit tests, run self-checking assembly/C programs, and validate exception paths before moving to the processor core.
+Begin processor core design (M4): implement a single-cycle or pipelined RV32E_Zicsr core in Verilog, then verify it against the emulator using the difftest harness.

@@ -83,7 +83,7 @@ Commands can be separated by semicolons. `#` starts a comment.
 | Command | Description |
 |---------|-------------|
 | `load <file> [addr]` | Load raw binary at `addr` (default `0x20000000`). |
-| `load_elf <file>` | ELF loader (deferred; currently returns error). |
+| `load_elf <file>` | Load a 32-bit RISC-V ELF and set the reset vector to its entry point. |
 | `reset [addr]` | Reset CPU to `addr`. |
 | `step [n]` | Execute `n` instructions (default 1). |
 | `run [n]` | Run until halt or `n` instructions retire. |
@@ -177,7 +177,6 @@ The test executable is `emulator/build/tests/emulator_test`.
 
 ## Future Work
 
-- ELF loader.
 - Spike adapter for a third reference opinion.
 - Verilator RTL adapter sharing the `ISS` interface (difftest harness already in place).
 - Shared-clock mode for timing-sensitive difftests.

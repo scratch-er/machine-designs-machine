@@ -105,6 +105,37 @@ The ISA test suite under `workloads/isa-test/` is run with:
 
 It builds every `.S` file with the workload-build skill, runs it in the emulator, and checks that the UART output is exactly `"PASS\n"`.
 
+## Building AbstractMachine Kernels
+
+The AbstractMachine tree at `workloads/abstract-machine/` has been ported to `riscv32e-npc`.
+Build an AM kernel with the Clang/LLVM toolchain configured in `data/workload-build/config.sh`:
+
+```bash
+source data/workload-build/config.sh
+make -C workloads/am-kernels/kernels/hello \
+  AM_HOME=$(pwd)/workloads/abstract-machine ARCH=riscv32e-npc
+```
+
+Run it on the emulator:
+
+```bash
+make -C workloads/am-kernels/kernels/hello \
+  AM_HOME=$(pwd)/workloads/abstract-machine ARCH=riscv32e-npc run
+```
+
+Pass main arguments with `mainargs="..."`:
+
+```bash
+make -C workloads/am-kernels/kernels/hello \
+  AM_HOME=$(pwd)/workloads/abstract-machine ARCH=riscv32e-npc run mainargs="world"
+```
+
+You can also load the ELF directly:
+
+```bash
+./emulator/build/emulator -e "load_elf build/hello-riscv32e-npc.elf; run; exit"
+```
+
 ## Common Pitfalls
 
 - **Wrong base address**: the default reset vector is `0x20000000`. Load binaries there unless you override `--reset-vector`.

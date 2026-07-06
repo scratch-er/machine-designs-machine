@@ -43,7 +43,57 @@ endif
 ### Checks end here
 endif
 
-## 2. General Compilation Targets
+## 2. Toolchain configuration
+
+# Load the same LLVM/Clang configuration used by the workload-build skill if it
+# exists.  Environment variables always win.  If no config is present, fall back
+# to bare clang/llvm tools on PATH.
+AM_TOOLCHAIN_CONFIG := $(AM_HOME)/../data/workload-build/config.sh
+ifneq ($(wildcard $(AM_TOOLCHAIN_CONFIG)),)
+  # Source the shell config and capture the variables it exports.  The temporary
+  # makefile is regenerated each run so moving the toolchain is picked up.
+  # For AR/RANLIB, fall back to ${LLVM_PREFIX}/llvm-* when the config leaves
+  # them unset.
+  $(shell . $(AM_TOOLCHAIN_CONFIG) >/dev/null 2>&1; \
+    : "$${AR:=${LLVM_PREFIX:-}/llvm-ar}"; \
+    : "$${OBJCOPY:=${LLVM_PREFIX:-}/llvm-objcopy}"; \
+    : "$${OBJDUMP:=${LLVM_PREFIX:-}/llvm-objdump}"; \
+    : "$${READELF:=${LLVM_PREFIX:-}/llvm-readelf}"; \
+    printf 'CC?=%s\nAS?=%s\nLD?=%s\nAR?=%s\nOBJCOPY?=%s\nOBJDUMP?=%s\nREADELF?=%s\n' \
+        "$$CC" "$$AS" "$$LD" "$$AR" "$$OBJCOPY" "$$OBJDUMP" "$$READELF" \
+        > $(AM_HOME)/.toolchain.mk)
+  -include $(AM_HOME)/.toolchain.mk
+endif
+
+# Defaults when the config is missing or incomplete.  GNU Make has built-in
+# defaults for many of these (e.g., AR=ar, CC=cc); only override them when the
+# value came from Make itself, so environment variables always win.
+ifeq ($(origin CC),default)
+  CC := clang
+endif
+ifeq ($(origin AS),default)
+  AS := llvm-mc
+endif
+ifeq ($(origin LD),default)
+  LD := ld.lld
+endif
+ifeq ($(origin AR),default)
+  AR := $(if $(LLVM_PREFIX),$(LLVM_PREFIX)/llvm-ar,llvm-ar)
+endif
+ifeq ($(origin OBJCOPY),default)
+  OBJCOPY := llvm-objcopy
+endif
+ifeq ($(origin OBJDUMP),default)
+  OBJDUMP := llvm-objdump
+endif
+ifeq ($(origin READELF),default)
+  READELF := llvm-readelf
+endif
+ifeq ($(origin CXX),default)
+  CXX := clang++
+endif
+
+## 3. General Compilation Targets
 
 ### Create the destination directory (`build/$ARCH`)
 WORK_DIR  = $(shell pwd)
@@ -73,16 +123,6 @@ LINKAGE  += $(OBJS)  # library archives are added by LIB_TEMPLATE below
 
 ## 3. General Compilation Flags
 
-### (Cross) compilers, e.g., mips-linux-gnu-g++
-AS        = $(CROSS_COMPILE)gcc
-CC        = $(CROSS_COMPILE)gcc
-CXX       = $(CROSS_COMPILE)g++
-LD        = $(CROSS_COMPILE)ld
-AR        = $(CROSS_COMPILE)ar
-OBJDUMP   = $(CROSS_COMPILE)objdump
-OBJCOPY   = $(CROSS_COMPILE)objcopy
-READELF   = $(CROSS_COMPILE)readelf
-
 ### Compilation flags
 INC_PATH += $(WORK_DIR)/include $(addsuffix /include/, $(addprefix $(AM_HOME)/, $(LIBS)))
 INCFLAGS += $(addprefix -I, $(INC_PATH))
@@ -97,12 +137,14 @@ CFLAGS   += -O2 -MMD -Wall -Werror $(INCFLAGS) \
             -Wno-main -U_FORTIFY_SOURCE -fvisibility=hidden
 CXXFLAGS +=  $(CFLAGS) -ffreestanding -fno-rtti -fno-exceptions
 ASFLAGS  += -MMD $(INCFLAGS)
-LDFLAGS  += -z noexecstack $(addprefix -T, $(LDSCRIPTS))
 
 ## 4. Arch-Specific Configurations
 
 ### Paste in arch-specific configurations (e.g., from `scripts/x86_64-qemu.mk`)
 -include $(AM_HOME)/scripts/$(ARCH).mk
+
+### Add linker scripts now that arch-specific configs have populated LDSCRIPTS.
+LDFLAGS  += -z noexecstack $(addprefix -T, $(LDSCRIPTS))
 
 ## 5. Compilation Rules
 
@@ -121,10 +163,10 @@ $(DST_DIR)/%.o: %.cpp
 	@mkdir -p $(dir $@) && echo + CXX $<
 	@$(CXX) -std=c++17 $(CXXFLAGS) -c -o $@ $(realpath $<)
 
-### Rule (compile): a single `.S` -> `.o` (gcc, which preprocesses and calls as)
+### Rule (compile): a single `.S` -> `.o` (clang preprocessor + assembler)
 $(DST_DIR)/%.o: %.S
 	@mkdir -p $(dir $@) && echo + AS $<
-	@$(AS) $(ASFLAGS) -c -o $@ $(realpath $<)
+	@$(CC) -x assembler-with-cpp $(CFLAGS) -c -o $@ $(realpath $<)
 
 ifeq ($(MAKECMDGOALS),archive)
 ### Rule (archive): objects (`*.o`) -> `ARCHIVE.a` (ar)
@@ -136,11 +178,13 @@ else
 define LIB_TEMPLATE =
 $$(AM_HOME)/$(1)/build/$(1)-$$(ARCH).a: force
 	@$$(MAKE) -s -C $$(AM_HOME)/$(1) archive
-LINKAGE += $$(AM_HOME)/$(1)/build/$(1)-$$(ARCH).a
 endef
 
-### Rule (recursive make): build a dependent library (am, klib, ...)
+### Recursive make rules for dependent libraries (am, klib, ...)
 $(foreach lib, $(LIBS), $(eval $(call LIB_TEMPLATE,$(lib))))
+
+### Add library archives to the link line.
+LINKAGE += $(foreach lib,$(LIBS),$(AM_HOME)/$(lib)/build/$(lib)-$(ARCH).a)
 endif
 
 ### Rule (link): objects (`*.o`) and libraries (`*.a`) -> `IMAGE.elf`, the final ELF binary to be packed into image (ld)
