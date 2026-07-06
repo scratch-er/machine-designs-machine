@@ -14,6 +14,7 @@ static void print_usage(const char* prog) {
               << "  --reset-vector <addr> Set reset vector (hex)\n"
               << "  --ram-base <addr>     Set RAM base (hex)\n"
               << "  --ram-size <size>     Set RAM size (hex)\n"
+              << "  --strict-mem          Treat unmapped data accesses as faults\n"
               << "  --log <level>         Set log level\n"
               << "  -h, --help            Show this help\n";
 }
@@ -40,6 +41,8 @@ int main(int argc, char** argv) {
             cfg.ram_size = static_cast<u32>(std::stoul(argv[++i], nullptr, 16));
         } else if (arg == "--log" && i + 1 < argc) {
             cfg.log_level = static_cast<int>(std::stoul(argv[++i]));
+        } else if (arg == "--strict-mem") {
+            cfg.strict_mem = true;
         } else {
             std::cerr << "Unknown option: " << arg << "\n";
             print_usage(argv[0]);

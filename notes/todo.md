@@ -31,7 +31,8 @@
 - [x] Implement the decoder and basic RV32E interpreter.
 - [x] Add memory, CLINT, UART, and shell.
 - [x] Create a small assembly workload and run it on the emulator.
-- [ ] Verify the emulator with more complex workloads before starting the processor core.
+- [x] Verify the emulator with more complex workloads before starting the processor core.
+- [x] Create ISA test suite under `workloads/isa-test/` and run it successfully.
 - [x] Write user-facing emulator documentation (README, architecture, workload guide).
 
 ## Recent notes
@@ -45,4 +46,10 @@
 - Added `workload-build` skill and `data/workload-build/config.sh`; defaults point to Homebrew LLVM.
 - Rebuilt emulator, built `workloads/asm/uart_pass/pass.S` with the skill, and ran it successfully (`PASS`, 12 instructions).
 - Also verified a tiny C workload using `skills/workload-build/crt0.S` (stack setup, `main`, then `ebreak`).
-- The pending task is to verify the emulator with more complex workloads before starting the processor core.
+- Added ISA test suite in `workloads/isa-test/`:
+  - 14 hand-written assembly tests covering ALU, shifts, compares, LUI/AUIPC, branches, jumps, load/store, CSR, exceptions, illegal instructions, memory faults under `--strict-mem`, miscellaneous privileged instructions (fence/fence.i/wfi/mret), CLINT, and UART.
+  - 2 generated combinatorial tests (`scripts/gen_alu_tests.py`, `scripts/gen_branch_tests.py`) covering operand grids.
+  - Common macros in `workloads/isa-test/common/test_macros.S` and runner in `workloads/isa-test/run_tests.sh`.
+  - Runner builds each workload with the `workload-build` skill, runs it in the emulator with a per-test instruction budget, captures UART output, and re-runs failures with instruction tracing.
+  - All 16 workloads pass (`./workloads/isa-test/run_tests.sh`).
+- Added `--strict-mem` CLI flag to `emulator/src/main.cpp` so the strict memory-fault mode can be tested from the command line.

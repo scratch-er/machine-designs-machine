@@ -1,0 +1,15 @@
+# Build and run artifacts
+*.o
+*.elf
+*.bin
+*.lst
+*.out
+*.build.log
+*.run.log
+*.trace
+
+# Generated combinatorial workloads are recreated by the runner.
+generated/*.S
+
+# Per-test emulator flags and UART input are part of the source
+# and should be committed, so they are not ignored.
