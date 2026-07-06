@@ -22,6 +22,8 @@ EmulatorISS::EmulatorISS(Config cfg)
 void EmulatorISS::reset(u32 reset_addr) {
     cycle_ = 0;
     retire_idx_ = 0;
+    ring_head_ = 0;
+    ring_full_ = false;
     hart_.reset(reset_addr);
     clint_.reset();
     uart_.reset();
@@ -30,6 +32,25 @@ void EmulatorISS::reset(u32 reset_addr) {
 bool EmulatorISS::step_cycle() {
     CommitEvent ev;
     return step_inst(ev);
+}
+
+void EmulatorISS::push_ring(const CommitEvent& ev) {
+    ring_buffer_[ring_head_] = ev;
+    ring_head_ = (ring_head_ + 1) % RING_SIZE;
+    if (ring_head_ == 0) ring_full_ = true;
+}
+
+std::vector<CommitEvent> EmulatorISS::last_events(size_t n) const {
+    if (n > RING_SIZE) n = RING_SIZE;
+    size_t count = ring_full_ ? RING_SIZE : ring_head_;
+    if (n > count) n = count;
+    std::vector<CommitEvent> out;
+    out.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        size_t idx = (ring_head_ + RING_SIZE - 1 - i) % RING_SIZE;
+        out.push_back(ring_buffer_[idx]);
+    }
+    return out;
 }
 
 u32 EmulatorISS::csr(u32 addr) const {
@@ -137,6 +158,7 @@ CommitEvent EmulatorISS::commit(u32 pc, u32 inst, u32 rd, u32 rd_value, u32 next
     ev.cause = cause;
     ev.next_pc = next_pc;
     tracer_.trace_inst(retire_idx_, ev);
+    push_ring(ev);
     ++retire_idx_;
     return ev;
 }

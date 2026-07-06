@@ -46,14 +46,23 @@ _start:
     ebreak
 ```
 
-## Building with llvm-mc
+## Building with the Workload-Build Skill
+
+The repository provides a `workload-build` skill under `skills/workload-build/build.sh` that wraps `llvm-mc`, `ld.lld`, and `llvm-objcopy` with the correct RV32E flags:
 
 ```bash
+./skills/workload-build/build.sh workloads/asm/uart_pass/pass.S workloads/asm/uart_pass/pass
+```
+
+This produces `pass.bin` and `pass.lst`. Toolchain paths default to Homebrew LLVM and can be overridden in `data/workload-build/config.sh`.
+
+## Building with llvm-mc directly
+
+```bash
+export LLVM=/opt/homebrew/Cellar/llvm/22.1.7_1/bin
 $LLVM/llvm-mc -triple=riscv32 -mattr=+e -filetype=obj pass.S -o pass.o
 $LLVM/llvm-objcopy -O binary pass.o pass.bin
 ```
-
-`-mattr=+e` enables the RV32E register set. Without it, the assembler accepts `x16`–`x31` and the emulator will trap on those instructions.
 
 ## Running on the Emulator
 
@@ -88,6 +97,14 @@ Tests should communicate pass/fail by writing to the virtual UART and then stopp
 
 The emulator prints UART bytes to stdout, so a human can read the result directly. Automated harnesses can capture the UART output string or check the exit/halt state.
 
+The ISA test suite under `workloads/isa-test/` is run with:
+
+```bash
+./workloads/isa-test/run_tests.sh
+```
+
+It builds every `.S` file with the workload-build skill, runs it in the emulator, and checks that the UART output is exactly `"PASS\n"`.
+
 ## Common Pitfalls
 
 - **Wrong base address**: the default reset vector is `0x20000000`. Load binaries there unless you override `--reset-vector`.
@@ -100,4 +117,3 @@ The emulator prints UART bytes to stdout, so a human can read the result directl
 
 - C runtime and newlib support once the ELF loader is implemented.
 - Makefile rules under `workloads/` for common build patterns.
-- A test harness that runs every workload and checks PASS/FAIL output.

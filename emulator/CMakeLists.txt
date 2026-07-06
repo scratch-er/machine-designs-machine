@@ -24,6 +24,7 @@ set(EMULATOR_SOURCES
     src/uart.cpp
     src/shell.cpp
     src/trace.cpp
+    src/difftest.cpp
 )
 
 add_library(emulator_lib STATIC ${EMULATOR_SOURCES})

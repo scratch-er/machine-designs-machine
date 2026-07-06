@@ -14,6 +14,8 @@ struct Config {
     u32 ram_size     = 0x00100000;  // 1 MiB
     bool strict_mem  = false;
     u32 commit_timeout_cycles = 10000;
+    u64 max_cycles   = 0;        // 0 = unlimited
+    u32 max_pc_stuck = 0;        // 0 = disabled
     int log_level    = 0;
 
     // Static validation / helpers

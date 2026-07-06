@@ -36,6 +36,7 @@ Key methods:
 - `step_inst(event)` — advance until one instruction retires or an exception is taken, filling a `CommitEvent`.
 - State queries: `pc()`, `reg(idx)`, `csr(addr)`, `read_mem(...)`, `write_mem(...)`.
 - Loading and checkpointing: `load_bin`, `load_elf`, `save_checkpoint`, `load_checkpoint`.
+- Difftest support: `Difftest` in `src/difftest.cpp` drives two `ISS` implementations and reports the first mismatch.
 
 `CommitEvent` is the atomic unit of comparison in difftest. It records the PC, instruction, destination register, register value, exception flag, cause, and next PC at retirement.
 
@@ -102,6 +103,16 @@ MMIO dispatch in `EmulatorISS::execute` routes CLINT and UART accesses before ca
 
 `Shell` tokenizes lines, splits on semicolons, and dispatches commands. It is intentionally simple: no quoting, no variables, no control flow. It is enough for automated test scripts and light interactive debugging.
 
+Recent additions to the command set:
+
+- `break` / `delete-break` / `clear-breaks` / `list-breaks` for PC breakpoints.
+- `run to <addr>`, `run until uart <string>`, and `run until reg <i> <value>` for run-until semantics.
+- `trace on <filter>` / `trace off` for selective tracing.
+- `last [n]` to inspect the last retired instructions without full logging.
+- `dump state` for a concise architectural summary.
+
+The `run` command honors global limits set by `--max-cycles` and `--max-pc-stuck`, which are useful when running potentially hung programs.
+
 ## Tracing
 
 `Tracer` prints a line per retired instruction when log level is at least 1:
@@ -110,11 +121,15 @@ MMIO dispatch in `EmulatorISS::execute` routes CLINT and UART accesses before ca
 R=<retire_idx> C=<cycle> PC=<pc> I=<inst> RD=<rd> RV=<value> NPC=<next_pc> EXC=<exc> CAUSE=<cause>
 ```
 
+`TraceFilter` allows runtime selection of which instructions are printed (`all`, `branches`, `loads`, `stores`, `exceptions`, `reg i`, `pc low high`). When a filter is active, matching instructions are traced and sub-traces are restricted to the same category. This is useful for zooming in on a bug region without generating a full trace.
+
 This format is designed to be diffed against an RTL trace log.
 
 ## Difftest Preparation
 
-The emulator already produces `CommitEvent`s. A future `RtlISS` will implement the same `ISS` interface, drive Verilator and the AXI memory model, and return one `CommitEvent` per retired instruction. The harness can compare events as they arrive or buffer them and compare later.
+The emulator already produces `CommitEvent`s. The `Difftest` class in `src/difftest.cpp` compares two `ISS` instances instruction-by-instruction and reports the first mismatch. It is self-tested in `emulator/tests/test_main.cpp` with two identical `EmulatorISS` instances.
+
+A future `RtlISS` will implement the same `ISS` interface, drive Verilator and the AXI memory model, and return one `CommitEvent` per retired instruction. The harness can then compare the emulator reference against the RTL DUT with no changes to the comparison logic.
 
 See `notes/difftest-design.md` for the full plan.
 
@@ -130,11 +145,12 @@ If the processor core ever adds an extension:
 
 ## Testing Strategy
 
-- Decoder tests: verify known encodings produce the right type and fields.
-- ALU tests: exercise every arithmetic/logical operation.
-- Memory tests: aligned access, byte ordering, MMIO.
-- CSR tests: read/write implemented CSRs, illegal CSR exception.
-- Exception tests: misaligned fetch, `ebreak`, `ecall`, `mret`, illegal instruction.
+- Decoder tests: verify known encodings produce the right type and fields, including illegal/unknown opcodes and RV32E register checks.
+- ALU/shift/compare tests: exercise every arithmetic/logical operation with edge operands.
+- Memory tests: aligned access, unaligned faults, byte ordering, strict-mode faults, MMIO.
+- CSR tests: read/write implemented CSRs, all six CSR instruction variants, illegal CSR exception.
+- Exception tests: misaligned fetch, misaligned branch/jump targets, `ebreak`, `ecall`, `mret`, exception priority.
+- Difftest self-test: confirm two `EmulatorISS` instances match and that injected mismatches are detected.
 - End-to-end: compile a workload, run it, check UART output.
 
-Run tests with `ctest --test-dir emulator/build --output-on-failure`.
+Run tests with `ctest --test-dir emulator/build --output-on-failure`. The ISA workload suite under `workloads/isa-test/` is run with `./workloads/isa-test/run_tests.sh`.

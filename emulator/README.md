@@ -34,7 +34,8 @@ Key source files:
 | `src/clint.cpp` | Built-in timer (`mtime`/`mtimeh`). |
 | `src/uart.cpp` | Virtual UART byte channel. |
 | `src/shell.cpp` | Interactive/scripted command loop. |
-| `src/trace.cpp` | Retirement and bus tracing. |
+| `src/trace.cpp` | Retirement and bus tracing, plus selective trace filters. |
+| `src/difftest.cpp` | Instruction-by-instruction harness for reference/DUT comparison. |
 
 ## Building
 
@@ -86,15 +87,26 @@ Commands can be separated by semicolons. `#` starts a comment.
 | `reset [addr]` | Reset CPU to `addr`. |
 | `step [n]` | Execute `n` instructions (default 1). |
 | `run [n]` | Run until halt or `n` instructions retire. |
+| `run to <addr>` | Run until PC reaches `addr`. |
+| `run until uart <string>` | Run until UART output contains `string`. |
+| `run until reg <i> <value>` | Run until register `xi` equals `value`. |
+| `break <addr>` | Set a PC breakpoint. |
+| `delete-break <addr>` | Remove a PC breakpoint. |
+| `clear-breaks` | Remove all breakpoints. |
+| `list-breaks` | Show breakpoints. |
 | `print pc` | Show PC. |
 | `print reg [i]` | Show all registers or register `i`. |
 | `print csr <addr>` | Show CSR at hex address. |
 | `print mem <addr> <size>` | Dump `size` bytes starting at `addr`. |
+| `dump state` | Print concise architectural state. |
 | `checkpoint save <file>` | Save architectural state to file. |
 | `checkpoint load <file>` | Restore state from file. |
 | `uart input <file\|hex>` | Set UART input source. |
 | `uart output <file>` | Redirect UART output to file. |
 | `log <level>` | Set log level (0=quiet, 1=inst, 2=reg/exc, 3=mem, 4=decoder). |
+| `trace on [filter]` | Enable selective tracing (`all`, `branches`, `loads`, `stores`, `exceptions`, `reg i`, `pc low high`). |
+| `trace off` | Disable selective tracing. |
+| `last [n]` | Show the last `n` retired instructions. |
 | `exit`, `quit` | Leave the shell. |
 
 ## Configuration Options
@@ -104,6 +116,9 @@ Commands can be separated by semicolons. `#` starts a comment.
 | `--reset-vector <hex>` | `0x20000000` | Reset PC. |
 | `--ram-base <hex>` | `0x20000000` | Start of flat RAM. |
 | `--ram-size <hex>` | `0x00100000` (1 MiB) | RAM size. |
+| `--strict-mem` | off | Treat unmapped data accesses as faults. |
+| `--max-cycles <N>` | `0` | Terminate `run` after `N` cycles (0 = unlimited). |
+| `--max-pc-stuck <N>` | `0` | Terminate `run` if same PC retires `N` times. |
 | `--log <level>` | `0` | Default log level. |
 
 CLINT and UART bases are currently compile-time defaults (`0x02000000` and `0x10000000`); they will become command-line flags when the RTL needs to match them.
@@ -158,11 +173,11 @@ The test executable is `emulator/build/tests/emulator_test`.
   /opt/homebrew/Cellar/llvm/22.1.7_1/bin/llvm-mc -triple=riscv32 -mattr=+e -filetype=obj pass.S -o pass.o
   /opt/homebrew/Cellar/llvm/22.1.7_1/bin/llvm-objcopy -O binary pass.o pass.bin
   ```
-- Out-of-range data accesses return `0` by default (open address space). This matches the spec; use `--strict-mem` when it becomes available if you prefer faults.
+- Out-of-range data accesses return `0` by default (open address space). This matches the spec; use `--strict-mem` if you prefer faults.
 
 ## Future Work
 
 - ELF loader.
 - Spike adapter for a third reference opinion.
-- Verilator RTL adapter sharing the `ISS` interface.
+- Verilator RTL adapter sharing the `ISS` interface (difftest harness already in place).
 - Shared-clock mode for timing-sensitive difftests.

@@ -34,23 +34,20 @@
 - [x] Verify the emulator with more complex workloads before starting the processor core.
 - [x] Create ISA test suite under `workloads/isa-test/` and run it successfully.
 - [x] Write user-facing emulator documentation (README, architecture, workload guide).
+- [x] Add debugging features: breakpoints, run-until, trace filters, last-N ring buffer, watchdog limits.
+- [x] Implement difftest harness and self-test.
+- [x] Expand unit tests and ISA workloads for exception paths and CSR variants.
+
+## Next steps
+
+- Begin processor core design (M4): choose microarchitecture, implement single-cycle or pipelined RV32E_Zicsr in Verilog.
+- Use the difftest harness to compare RTL against the emulator (M5).
+- Defer: GoogleTest migration, watchpoints, in-memory snapshots, Spike adapter, ELF loader.
 
 ## Recent notes
 
-- Emulator builds with CMake in `emulator/build`; use `cmake --build emulator/build -j`.
-- `compile_commands.json` is generated in `emulator/build`.
-- Homebrew LLVM at `/opt/homebrew/Cellar/llvm/22.1.7_1/bin/` is used for RISC-V assembly (`llvm-mc`, `llvm-objcopy`).
-- First workload: `workloads/asm/uart_pass/pass.S` prints "PASS\n" via UART and `ebreak`s.
-- Tests live in `emulator/tests/test_main.cpp` and run with `ctest --test-dir emulator/build`.
-- Git commit `5d6a1cf` added the emulator; binaries and build dirs are ignored.
-- Added `workload-build` skill and `data/workload-build/config.sh`; defaults point to Homebrew LLVM.
-- Rebuilt emulator, built `workloads/asm/uart_pass/pass.S` with the skill, and ran it successfully (`PASS`, 12 instructions).
-- Also verified a tiny C workload using `skills/workload-build/crt0.S` (stack setup, `main`, then `ebreak`).
-- Added ISA test suite in `workloads/isa-test/`:
-  - 14 hand-written assembly tests covering ALU, shifts, compares, LUI/AUIPC, branches, jumps, load/store, CSR, exceptions, illegal instructions, memory faults under `--strict-mem`, miscellaneous privileged instructions (fence/fence.i/wfi/mret), CLINT, and UART.
-  - 2 generated combinatorial tests (`scripts/gen_alu_tests.py`, `scripts/gen_branch_tests.py`) covering operand grids.
-  - Common macros in `workloads/isa-test/common/test_macros.S` and runner in `workloads/isa-test/run_tests.sh`.
-  - Runner builds each workload with the `workload-build` skill, runs it in the emulator with a per-test instruction budget, captures UART output, and re-runs failures with instruction tracing.
-  - All 16 workloads pass (`./workloads/isa-test/run_tests.sh`).
-- Added `--strict-mem` CLI flag to `emulator/src/main.cpp` so the strict memory-fault mode can be tested from the command line.
-- Wrote `notes/emulator-debugging.md` summarising the lessons from ISA-test debugging and the emulator features needed for real-world program debugging (breakpoints, watchpoints, selective tracing, run-until, snapshots, ring buffer, hang detection).
+- Added debugging features to the emulator: PC breakpoints, `run to`/`run until`, selective trace filters, `last` ring buffer, `dump state`, and `--max-cycles`/`--max-pc-stuck` watchdog flags.
+- Implemented the difftest harness in `emulator/src/difftest.cpp` with a self-test in `emulator/tests/test_main.cpp`.
+- Expanded C++ unit tests to cover decoder formats, RV32E register checks, all ALU/shift/compare instructions, branch/jump misaligned targets, load/store sizes and faults, all CSR instruction variants, and exception priorities.
+- Added ISA workloads: `ecall.S`, `mret.S`, `branch_misaligned.S`, `csr_all.S`, `exception_priority.S`. The suite now has 21 workloads and all pass.
+- Updated `notes/emulator-design.md` with the new shell commands, trace filters, and difftest harness.

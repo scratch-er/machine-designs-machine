@@ -15,6 +15,8 @@ static void print_usage(const char* prog) {
               << "  --ram-base <addr>     Set RAM base (hex)\n"
               << "  --ram-size <size>     Set RAM size (hex)\n"
               << "  --strict-mem          Treat unmapped data accesses as faults\n"
+              << "  --max-cycles <N>      Terminate after N cycles (0 = unlimited)\n"
+              << "  --max-pc-stuck <N>    Terminate if same PC retires N times\n"
               << "  --log <level>         Set log level\n"
               << "  -h, --help            Show this help\n";
 }
@@ -43,6 +45,10 @@ int main(int argc, char** argv) {
             cfg.log_level = static_cast<int>(std::stoul(argv[++i]));
         } else if (arg == "--strict-mem") {
             cfg.strict_mem = true;
+        } else if (arg == "--max-cycles" && i + 1 < argc) {
+            cfg.max_cycles = static_cast<u64>(std::stoull(argv[++i]));
+        } else if (arg == "--max-pc-stuck" && i + 1 < argc) {
+            cfg.max_pc_stuck = static_cast<u32>(std::stoul(argv[++i]));
         } else {
             std::cerr << "Unknown option: " << arg << "\n";
             print_usage(argv[0]);

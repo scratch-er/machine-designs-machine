@@ -61,8 +61,10 @@ A `Config` object holds all parameters that must match between the emulator and 
 | `ram_size`             | `0x00100000`  | Default RAM size (1 MiB)                         |
 | `strict_mem`           | `false`       | Treat unmapped data accesses as faults           |
 | `commit_timeout_cycles`| `10000`       | Max cycles `RtlISS` waits for a commit           |
+| `max_cycles`           | `0`           | Terminate `run` after N cycles (0 = unlimited)   |
+| `max_pc_stuck`         | `0`           | Terminate `run` if same PC retires N times       |
 
-The CLI parses flags such as `--reset-vector`, `--clint-base`, `--uart-base`, and `--strict-mem`. Both the emulator and the RTL testbench read the same config file or command line so they stay synchronized.
+The CLI parses flags such as `--reset-vector`, `--clint-base`, `--uart-base`, `--strict-mem`, `--max-cycles`, and `--max-pc-stuck`. Both the emulator and the RTL testbench read the same config file or command line so they stay synchronized.
 
 ## Abstract ISS Interface
 
@@ -312,18 +314,33 @@ Minimal byte channel:
 | `load_elf <file>`               | load ELF and use its segments/entry          |
 | `reset [addr]`                  | reset CPU; default reset vector              |
 | `step [n]`                      | execute n instructions (default 1)           |
-| `cycle [n]`                     | run n clock cycles (for RTL adapter)         |
 | `run [n]`                       | run until n instructions retire or stop      |
+| `run to <addr>`                 | run until PC reaches addr                    |
+| `run until uart <string>`       | run until UART output contains string        |
+| `run until reg <i> <value>`     | run until register xi equals value           |
+| `break <addr>`                  | set PC breakpoint                            |
+| `delete-break <addr>`           | remove PC breakpoint                         |
+| `clear-breaks`                  | remove all breakpoints                       |
+| `list-breaks`                   | show breakpoints                             |
 | `print pc`                      | show PC                                      |
 | `print reg [i]`                 | show register(s)                             |
 | `print csr [addr]`              | show CSR(s)                                  |
 | `print mem <addr> <size>`       | show memory bytes                            |
+| `dump state`                    | print concise architectural state            |
 | `checkpoint save <file>`        | save state to file                           |
 | `checkpoint load <file>`        | restore state from file                      |
 | `uart input <file|hex>`         | set UART input source                        |
 | `uart output <file>`            | set UART output sink                         |
 | `log <level>`                   | set log level (0=quiet, 1=inst, 2=bus)       |
+| `trace on [filter]`             | enable selective tracing                     |
+| `trace off`                     | disable selective tracing                    |
+| `last [n]`                      | show last n retired instructions             |
 | `exit`                          | quit                                         |
+
+Notes:
+- `run` honors global limits set by `--max-cycles` and `--max-pc-stuck`.
+- Breakpoints and `run to` stop before the instruction at the target PC executes.
+- `trace on` filters are applied on top of the current log level; sub-traces are only printed when the filter allows them.
 
 ### Command parsing
 
@@ -365,6 +382,18 @@ Log levels:
 - `3`: memory and bus transactions.
 - `4`: decoder details and internal state.
 
+Selective tracing can be enabled at runtime with `trace on <kind>` and disabled with `trace off`. Supported filters are:
+
+- `all` — trace everything (respects the current log level).
+- `branches` — control-transfer instructions only.
+- `loads` — load instructions only.
+- `stores` — store instructions only.
+- `exceptions` — exception commits only.
+- `reg <i>` — instructions that write register `xi`.
+- `pc <low> <high>` — instructions whose PC falls in the range.
+
+When a filter is active, only matching instructions are printed; sub-traces are also restricted to the filter category.
+
 Default trace line format:
 
 ```
@@ -377,7 +406,9 @@ Trace output is line-oriented so it can be diffed with RTL trace logs.
 
 ## Differential Testing
 
-The difftest harness is described in `notes/difftest-design.md`. The emulator side is simple: `step_inst()` executes one instruction and returns a `CommitEvent` with `cycle` equal to the internal cycle counter. Because the software interpreter is 1-IPC, `cycle` equals the number of retired instructions.
+The difftest harness is described in `notes/difftest-design.md`. The emulator provides the reference side through `EmulatorISS::step_inst()`. The harness itself lives in `emulator/src/difftest.cpp` and is self-tested with two identical `EmulatorISS` instances in `emulator/tests/test_main.cpp`.
+
+Because the software interpreter is 1-IPC, `CommitEvent::cycle` equals the number of retired instructions. The harness compares `pc`, `inst` (when not an exception), `rd`/`rd_value` (when `rd != 0`), `exception`/`cause`, and `next_pc`; it does **not** compare `cycle` directly.
 
 ## Checkpoint Format
 

@@ -9,6 +9,8 @@
 #include "emulator/trace.h"
 #include "emulator/decoder.h"
 #include <memory>
+#include <array>
+#include <vector>
 
 namespace emulator {
 
@@ -41,9 +43,13 @@ public:
     Memory& memory() { return memory_; }
     Clint& clint() { return clint_; }
     Uart& uart() { return uart_; }
+    Tracer& tracer() { return tracer_; }
     const Config& config() const { return cfg_; }
 
     u64 cycle() const { return cycle_; }
+
+    // Last N retired instructions (most recent first).
+    std::vector<CommitEvent> last_events(size_t n = 64) const;
 
 private:
     Config cfg_;
@@ -55,6 +61,13 @@ private:
     u64 cycle_ = 0;
     u64 retire_idx_ = 0;
     int log_level_ = 0;
+
+    static constexpr size_t RING_SIZE = 64;
+    std::array<CommitEvent, RING_SIZE> ring_buffer_;
+    size_t ring_head_ = 0;
+    bool ring_full_ = false;
+
+    void push_ring(const CommitEvent& ev);
 
     bool execute(const DecodedInst& d, CommitEvent& out);
     CommitEvent commit(u32 pc, u32 inst, u32 rd, u32 rd_value, u32 next_pc,
