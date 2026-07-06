@@ -12,3 +12,5 @@ compile_commands.json
 *.d
 *.bin
 workloads/**/*.bin
+workloads/**/*.lst
+*.lst

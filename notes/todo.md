@@ -18,6 +18,11 @@
 - Run `uv run tools/semantic-search/index.py --source-root specs --index data/semantic-search/index.db` to update the index after spec changes.
 - Add future Python tools as workspace members under `tools/`.
 - The `semantic-search` skill is available for spec questions.
+- The `workload-build` skill is available for compiling/assembling RISC-V workloads.
+  - Config and toolchain paths live in `data/workload-build/config.sh`.
+  - Linker script and `crt0.S` live in `skills/workload-build/`.
+  - Build helper: `skills/workload-build/build.sh <source.S|source.c> [output-stem]`.
+  - Builds produce `<stem>.bin` and `<stem>.lst`.
 
 ## Pending tasks
 
@@ -37,3 +42,7 @@
 - First workload: `workloads/asm/uart_pass/pass.S` prints "PASS\n" via UART and `ebreak`s.
 - Tests live in `emulator/tests/test_main.cpp` and run with `ctest --test-dir emulator/build`.
 - Git commit `5d6a1cf` added the emulator; binaries and build dirs are ignored.
+- Added `workload-build` skill and `data/workload-build/config.sh`; defaults point to Homebrew LLVM.
+- Rebuilt emulator, built `workloads/asm/uart_pass/pass.S` with the skill, and ran it successfully (`PASS`, 12 instructions).
+- Also verified a tiny C workload using `skills/workload-build/crt0.S` (stack setup, `main`, then `ebreak`).
+- The pending task is to verify the emulator with more complex workloads before starting the processor core.
