@@ -65,21 +65,46 @@ while (true) {
 
 This works because both models execute the same dynamic instruction stream in the same order. The DUT may take many cycles per instruction; `RtlISS::step_inst()` hides that from the harness.
 
-### Handling `mtime`
+### Handling external/peripheral inputs (`mtime`, UART RX, etc.)
 
-Because the reference interpreter is 1-IPC and the RTL may be pipelined, the raw cycle count will differ for the same instruction sequence. Programs that read `mtime` therefore see different values.
+The reference interpreter is 1-IPC, while the RTL may stall on AXI, cache misses, pipeline hazards, or future wait states. Therefore `cycle` and retired-instruction count are not equivalent. This matters for peripherals whose outputs are not purely architectural state:
 
-Options:
+- CLINT `mtime` is a global time base and must tick every hardware cycle in the RTL, not every committed instruction.
+- UART RX, future disk/network devices, and any other external input may become visible to the DUT at cycle-specific times.
+- The reference can only stay comparable if it observes the same peripheral input values that the DUT observed, not values generated from the reference's own single-cycle timing.
 
-1. **Avoid timing-sensitive programs in correctness difftest.** Most ISA tests do not read `mtime`; this is the simplest approach and is the default.
+The current baseline difftest workaround keeps `mtime` instruction-count based so existing CLINT tests pass. That is intentionally a temporary verification compromise and is not the architecturally correct RTL behavior.
 
-2. **Shared clock for timing-aware tests.** Both the emulator's CLINT and the RTL's CLINT are driven from the same `Clock` object:
-   - `Clock::tick()` is called once per Verilator cycle.
-   - `EmulatorISS` does not tick the clock on its own; instead, the difftest harness ticks the clock once for each RTL cycle.
-   - When the reference executes an instruction that reads `mtime`, it reads the current `Clock` value.
-   - This requires the reference to execute instructions "in lockstep" with RTL commits rather than freely running ahead.
+The correct long-term model is **DUT-observed peripheral input replay**:
 
-For M5 we use option 1. Option 2 is documented for later benchmarking.
+1. Standalone modes keep local peripherals:
+   - `EmulatorISS` uses its own `Memory`, CLINT, UART, and input queues.
+   - `RtlISS` uses its AXI simulation memory/MMIO devices.
+   - No cross-model coupling exists outside difftest.
+
+2. Difftest mode designates the RTL/DUT side as the source of external observations:
+   - The AXI/MMIO responder records every peripheral read result delivered to the DUT, keyed by `(retire_idx or sequence_id, device, address, size, value, fault)`.
+   - For CLINT, the RTL CLINT should tick every DUT cycle; when the DUT reads `mtime/mtimeh`, the observed value is recorded.
+   - For UART RX or other input devices, the byte/status value actually returned to the DUT is recorded.
+
+3. The reference consumes recorded observations instead of generating its own peripheral values:
+   - Add a difftest peripheral-input provider to `EmulatorISS`/`Memory`/MMIO plumbing.
+   - When REF executes a peripheral load, it asks the provider for the next observation matching the address/size/device.
+   - The provider returns the DUT-observed value and fault status; mismatched address/size/order is a difftest failure.
+   - Normal RAM loads/stores remain independently executed and compared architecturally.
+
+4. Keep architectural commit comparison commit-driven:
+   - `RtlISS::step_inst()` may consume many cycles and many internal AXI transactions before a commit.
+   - After the DUT commit is available, run/ref-step the REF instruction using the queued peripheral observations generated while reaching that DUT commit.
+   - Compare the resulting `CommitEvent` as today.
+
+5. Required refactor points:
+   - Split memory/MMIO devices behind an interface such as `BusDevice` or `PeripheralProvider` so standalone and difftest modes can use different providers.
+   - Extend `ISS` or the difftest harness with hooks to begin/end a retire window and drain DUT observations into REF.
+   - Move UART output/pass-fail observation out of ad hoc shell behavior and into the same external-device layer where practical.
+   - Add targeted tests where the DUT stalls before reading `mtime` and where REF would otherwise see a different value.
+
+This refactor is non-trivial and should be done after the AXI/i-cache baseline is stable, but before relying on CLINT/UART/input-heavy workloads for pipeline correctness or performance validation. Until then, avoid treating timing-sensitive peripheral tests as proof of correct CLINT timing.
 
 ## Commit Event Comparison
 

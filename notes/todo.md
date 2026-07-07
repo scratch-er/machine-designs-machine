@@ -45,6 +45,7 @@
 
 - Add the required flip-flop I-cache and burst fills before refactoring into the five-stage pipeline.
 - Later refactor into the five-stage pipeline with forwarding, hazards, flushes, precise exceptions, and I-cache AMAT counters.
+- Before relying on CLINT/UART/input-heavy workloads for pipeline validation, refactor difftest to replay DUT-observed peripheral inputs into REF; see `notes/difftest-design.md`.
 - If UART must be modeled in RTL simulation, implement it in the external AXI simulation memory/MMIO model, not in the core; generally ignore RTL UART writes during difftest and trust the emulator output if architectural execution matches.
 
 ## Deferred
@@ -108,3 +109,8 @@
   - Because a single AXI read channel cannot fetch and load in one combinational cycle, `npc_single_cycle.v` now uses a two-phase fetch/execute schedule while preserving one retired architectural instruction per execute phase.
   - CLINT `mtime` ticks on execute/retire phases to keep architectural time consistent with the emulator despite the two-phase baseline.
   - Verified with RTL Release build, CTest, and non-UART ISA difftest workloads (`alu`, `branch`, `branch_misaligned`, `clint`, `compare`, `csr`, `csr_all`, `ecall`, `exception`, `exception_priority`, `illegal_inst`, `jal_jalr`, `load_store`, `lui_auipc`, `mem_fault`, `misc_priv`, `mret`, `shift`, `alu_comb`, `branch_comb`).
+
+- Decided not to implement the CLINT/peripheral-input difftest refactor immediately:
+  - The current AXI/i-cache work needs a stable baseline first.
+  - Correct behavior requires DUT-observed peripheral input replay into REF, not instruction-count-based CLINT ticking.
+  - Detailed design and refactor points are recorded in `notes/difftest-design.md` under external/peripheral input handling.
