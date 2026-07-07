@@ -6,6 +6,7 @@
 module npc_clint (
     input              clock,
     input              reset,
+    input              tick_en,
 
     // Memory-mapped access (full 32-bit address)
     input              req_valid,
@@ -36,7 +37,7 @@ module npc_clint (
     always @(posedge clock or posedge reset) begin
         if (reset) begin
             mtime <= 64'h0;
-        end else begin
+        end else if (tick_en) begin
             if (req_valid && req_wen) begin
                 if (is_mtime)       mtime <= {mtime[63:32], req_wdata} + 64'h1;
                 else if (is_mtimeh) mtime <= {req_wdata, mtime[31:0]} + 64'h1;

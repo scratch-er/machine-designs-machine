@@ -43,7 +43,6 @@
 
 ## Next steps
 
-- Add a cycle-accurate AXI memory model in `RtlISS`, then switch the non-pipelined RTL core from direct DPI memory ports to the real AXI master path.
 - Add the required flip-flop I-cache and burst fills before refactoring into the five-stage pipeline.
 - Later refactor into the five-stage pipeline with forwarding, hazards, flushes, precise exceptions, and I-cache AMAT counters.
 - If UART must be modeled in RTL simulation, implement it in the external AXI simulation memory/MMIO model, not in the core; generally ignore RTL UART writes during difftest and trust the emulator output if architectural execution matches.
@@ -101,3 +100,11 @@
   - Added the new RTL files to `emulator/CMakeLists.txt`.
   - Verified with `cmake -S emulator -B emulator/build-rtl -DBUILD_RTL=ON -DCMAKE_BUILD_TYPE=Release`, `cmake --build emulator/build-rtl -j`, and `ctest --test-dir emulator/build-rtl --output-on-failure`.
   - Re-ran RTL difftest on the non-UART ISA workloads plus AM CoreMark and RT-Thread AM; all completed successfully.
+
+- Implemented the baseline AXI memory interface:
+  - Added `core/rtl/npc_axi_master.v` and wired `npc_core` to drive the real AXI4 master port instead of the DPI memory module.
+  - `RtlISS` now provides a zero-latency AXI simulation memory backed by `Memory`, returning `SLVERR` for invalid accesses.
+  - Updated the standalone `npc_core_tb.cpp` and RTL CMake source list for the AXI path.
+  - Because a single AXI read channel cannot fetch and load in one combinational cycle, `npc_single_cycle.v` now uses a two-phase fetch/execute schedule while preserving one retired architectural instruction per execute phase.
+  - CLINT `mtime` ticks on execute/retire phases to keep architectural time consistent with the emulator despite the two-phase baseline.
+  - Verified with RTL Release build, CTest, and non-UART ISA difftest workloads (`alu`, `branch`, `branch_misaligned`, `clint`, `compare`, `csr`, `csr_all`, `ecall`, `exception`, `exception_priority`, `illegal_inst`, `jal_jalr`, `load_store`, `lui_auipc`, `mem_fault`, `misc_priv`, `mret`, `shift`, `alu_comb`, `branch_comb`).

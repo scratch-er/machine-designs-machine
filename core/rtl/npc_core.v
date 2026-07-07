@@ -1,7 +1,6 @@
 // NPC Core top module.
 //
-// Phase 1: single-cycle baseline with DPI-C memory backend. The AXI4 master is
-// reserved/tied off; it will be wired up in the pipelined implementation.
+// Phase 1: single-cycle baseline datapath using the external AXI4 master port.
 
 `include "npc_defines.vh"
 
@@ -10,7 +9,7 @@ module npc_core (
     input              reset,
     input              io_interrupt,
 
-    // AXI4 master (reserved / tied off in single-cycle baseline)
+    // AXI4 master
     input              io_master_awready,
     output             io_master_awvalid,
     output     [31:0]  io_master_awaddr,
@@ -92,26 +91,6 @@ module npc_core (
     output     [31:0]  debug_csr_data
 `endif
 );
-
-    // Tie off reserved AXI master outputs.
-    assign io_master_awvalid = 1'b0;
-    assign io_master_awaddr  = 32'h0;
-    assign io_master_awid    = 4'h0;
-    assign io_master_awlen   = 8'h0;
-    assign io_master_awsize  = 3'h0;
-    assign io_master_awburst = 2'h0;
-    assign io_master_wvalid  = 1'b0;
-    assign io_master_wdata   = 32'h0;
-    assign io_master_wstrb   = 4'h0;
-    assign io_master_wlast   = 1'b0;
-    assign io_master_bready  = 1'b0;
-    assign io_master_arvalid = 1'b0;
-    assign io_master_araddr  = 32'h0;
-    assign io_master_arid    = 4'h0;
-    assign io_master_arlen   = 8'h0;
-    assign io_master_arsize  = 3'h0;
-    assign io_master_arburst = 2'h0;
-    assign io_master_rready  = 1'b0;
 
     // Tie off reserved AXI slave outputs.
     assign io_slave_awready = 1'b0;
@@ -205,9 +184,7 @@ module npc_core (
 `endif
     );
 
-    npc_memory_dpi memory_dpi (
-        .clock                  (clock),
-        .reset                  (reset),
+    npc_axi_master axi_master (
         .req_fetch_valid        (req_fetch_valid),
         .req_fetch_addr         (req_fetch_addr),
         .resp_fetch_inst        (resp_fetch_inst),
@@ -224,7 +201,36 @@ module npc_core (
         .req_store_size         (req_store_size),
         .req_store_data         (req_store_data),
         .resp_store_fault       (resp_store_fault),
-        .resp_store_misaligned  (resp_store_misaligned)
+        .resp_store_misaligned  (resp_store_misaligned),
+        .io_master_awready      (io_master_awready),
+        .io_master_awvalid      (io_master_awvalid),
+        .io_master_awaddr       (io_master_awaddr),
+        .io_master_awid         (io_master_awid),
+        .io_master_awlen        (io_master_awlen),
+        .io_master_awsize       (io_master_awsize),
+        .io_master_awburst      (io_master_awburst),
+        .io_master_wready       (io_master_wready),
+        .io_master_wvalid       (io_master_wvalid),
+        .io_master_wdata        (io_master_wdata),
+        .io_master_wstrb        (io_master_wstrb),
+        .io_master_wlast        (io_master_wlast),
+        .io_master_bready       (io_master_bready),
+        .io_master_bvalid       (io_master_bvalid),
+        .io_master_bresp        (io_master_bresp),
+        .io_master_bid          (io_master_bid),
+        .io_master_arready      (io_master_arready),
+        .io_master_arvalid      (io_master_arvalid),
+        .io_master_araddr       (io_master_araddr),
+        .io_master_arid         (io_master_arid),
+        .io_master_arlen        (io_master_arlen),
+        .io_master_arsize       (io_master_arsize),
+        .io_master_arburst      (io_master_arburst),
+        .io_master_rready       (io_master_rready),
+        .io_master_rvalid       (io_master_rvalid),
+        .io_master_rresp        (io_master_rresp),
+        .io_master_rdata        (io_master_rdata),
+        .io_master_rlast        (io_master_rlast),
+        .io_master_rid          (io_master_rid)
     );
 
 endmodule

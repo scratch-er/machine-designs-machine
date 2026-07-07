@@ -1,8 +1,8 @@
 // Single-cycle RV32E_Zicsr datapath.
 //
-// This module is the first implementation milestone. It retires one
-// instruction per cycle using a DPI-C memory backend. The AXI4 master is not
-// used in this baseline; it will be wired up in the pipelined design.
+// This module is the first implementation milestone. It uses a two-phase
+// fetch/execute schedule so the single AXI4 read channel can serve both
+// instruction fetches and data loads without combinational arbitration loops.
 
 `include "npc_defines.vh"
 
@@ -55,6 +55,11 @@ module npc_single_cycle (
     // Architectural state
     reg [31:0] pc;
     reg        halted;
+    reg        execute_phase;
+    reg [31:0] inst_reg;
+    reg [31:0] fetch_pc_reg;
+    reg        fetch_fault_reg;
+    reg        fetch_misaligned_reg;
 
     // Commit constants: mcause values
     localparam [31:0] CAUSE_INST_MISALIGNED   = 32'd0;
@@ -70,7 +75,7 @@ module npc_single_cycle (
     //==========================================================================
     // Decode
     //==========================================================================
-    wire [31:0] inst = resp_fetch_inst;
+    wire [31:0] inst = inst_reg;
     wire [4:0]  rd5;
     wire [4:0]  rs15;
     wire [4:0]  rs25;
@@ -181,8 +186,8 @@ module npc_single_cycle (
         .write_en   (csr_wen),
         .write_addr (inst_csr),
         .write_data (csr_wdata),
-        .exc_en     (exc_take),
-        .exc_mepc   (pc),
+        .exc_en     (execute_phase && exc_take),
+        .exc_mepc   (fetch_pc_reg),
         .exc_mcause (exc_cause),
         .mtvec      (mtvec_reg),
         .mepc       (mepc_reg)
@@ -255,6 +260,7 @@ module npc_single_cycle (
     npc_clint clint (
         .clock      (clock),
         .reset      (reset),
+        .tick_en    (execute_phase),
         .req_valid  (clint_req_valid),
         .req_wen    (clint_req_wen),
         .req_addr   (mem_addr),
@@ -268,8 +274,8 @@ module npc_single_cycle (
         .rs2_data          (rs2_data),
         .resp_load_data    (resp_load_data),
         .clint_rdata       (clint_rdata),
-        .ctrl_mem_read     (ctrl_mem_read),
-        .ctrl_mem_write    (ctrl_mem_write),
+        .ctrl_mem_read     (execute_phase && ctrl_mem_read),
+        .ctrl_mem_write    (execute_phase && ctrl_mem_write),
         .ctrl_mem_size     (ctrl_mem_size),
         .ctrl_mem_sext     (ctrl_mem_sext),
         .mem_addr          (mem_addr),
@@ -289,7 +295,7 @@ module npc_single_cycle (
         .clint_req_wen     (clint_req_wen)
     );
 
-    assign req_fetch_valid = 1'b1;
+    assign req_fetch_valid = !execute_phase && !halted;
     assign req_fetch_addr = pc;
 
     //==========================================================================
@@ -340,13 +346,13 @@ module npc_single_cycle (
         exc_cause = 32'h0;
 
         // 1. Instruction alignment / fetch fault
-        if (pc[1:0] != 2'b00) begin
+        if (fetch_pc_reg[1:0] != 2'b00) begin
             exc_take = 1'b1;
             exc_cause = CAUSE_INST_MISALIGNED;
-        end else if (resp_fetch_fault) begin
+        end else if (fetch_fault_reg) begin
             exc_take = 1'b1;
             exc_cause = CAUSE_INST_ACCESS_FAULT;
-        end else if (resp_fetch_misaligned) begin
+        end else if (fetch_misaligned_reg) begin
             exc_take = 1'b1;
             exc_cause = CAUSE_INST_MISALIGNED;
         // 2. Decode-time exceptions
@@ -415,11 +421,11 @@ module npc_single_cycle (
     // Register and CSR write controls
     //==========================================================================
     always @(*) begin
-        reg_wen   = ctrl_reg_write && !exc_take && (inst_rd != 4'd0);
+        reg_wen   = execute_phase && ctrl_reg_write && !exc_take && (inst_rd != 4'd0);
         reg_waddr = inst_rd;
         reg_wdata = rd_value;
 
-        csr_wen   = (ctrl_csr_op != `CSR_OP_NONE) && !exc_take && csr_do_write;
+        csr_wen   = execute_phase && (ctrl_csr_op != `CSR_OP_NONE) && !exc_take && csr_do_write;
         csr_wdata = csr_new_value;
     end
 
@@ -437,15 +443,27 @@ module npc_single_cycle (
 
     always @(posedge clock or posedge reset) begin
         if (reset) begin
-            pc              <= `RESET_VECTOR;
-            halted          <= 1'b0;
-            commit_valid_r  <= 1'b0;
+            pc                   <= `RESET_VECTOR;
+            halted               <= 1'b0;
+            execute_phase        <= 1'b0;
+            inst_reg             <= 32'h00000013;
+            fetch_pc_reg         <= `RESET_VECTOR;
+            fetch_fault_reg      <= 1'b0;
+            fetch_misaligned_reg <= 1'b0;
+            commit_valid_r       <= 1'b0;
+        end else if (!halted && !execute_phase) begin
+            inst_reg             <= resp_fetch_inst;
+            fetch_pc_reg         <= pc;
+            fetch_fault_reg      <= resp_fetch_fault;
+            fetch_misaligned_reg <= resp_fetch_misaligned;
+            execute_phase        <= 1'b1;
+            commit_valid_r       <= 1'b0;
         end else if (!halted) begin
             // Capture the instruction that retires this cycle. The PC register
-            // will be updated to next_pc, so we must record the current value
-            // here for the commit interface.
+            // will be updated to next_pc, so we must record the fetched PC here
+            // for the commit interface.
             commit_valid_r     <= 1'b1;
-            commit_pc_r        <= pc;
+            commit_pc_r        <= fetch_pc_reg;
             commit_inst_r      <= inst;
             commit_rd_r        <= reg_wen ? {1'b0, inst_rd} : 5'b0;
             commit_rd_value_r  <= reg_wen ? rd_value : 32'h0;
@@ -453,6 +471,7 @@ module npc_single_cycle (
             commit_cause_r     <= exc_cause;
             commit_next_pc_r   <= next_pc;
 
+            execute_phase <= 1'b0;
             if (exc_take) begin
                 pc <= mtvec_reg;
                 halted <= ctrl_ebreak;
@@ -479,7 +498,7 @@ module npc_single_cycle (
     //==========================================================================
     // Debug outputs
     //==========================================================================
-    assign debug_pc   = pc;
+    assign debug_pc   = execute_phase ? fetch_pc_reg : pc;
     assign debug_inst = inst;
 
 endmodule

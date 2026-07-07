@@ -50,6 +50,7 @@ if(BUILD_RTL)
     set(NPC_RTL_SOURCES
         ${NPC_RTL_DIR}/npc_core.v
         ${NPC_RTL_DIR}/npc_single_cycle.v
+        ${NPC_RTL_DIR}/npc_axi_master.v
         ${NPC_RTL_DIR}/npc_decoder.v
         ${NPC_RTL_DIR}/npc_imm.v
         ${NPC_RTL_DIR}/npc_alu.v
@@ -58,14 +59,12 @@ if(BUILD_RTL)
         ${NPC_RTL_DIR}/npc_regfile.v
         ${NPC_RTL_DIR}/npc_csr_file.v
         ${NPC_RTL_DIR}/npc_clint.v
-        ${NPC_RTL_DIR}/npc_memory_dpi.v
     )
 
     # RTL adapter that implements the ISS interface.
-    add_library(rtl_iss STATIC src/rtl_iss.cpp ${NPC_DPI_DIR}/npc_memory_dpi.cpp)
+    add_library(rtl_iss STATIC src/rtl_iss.cpp)
     target_include_directories(rtl_iss PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${NPC_DPI_DIR}
     )
     target_link_libraries(rtl_iss PUBLIC emulator_lib)
 
