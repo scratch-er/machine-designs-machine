@@ -273,7 +273,7 @@ module npc_single_cycle (
             7'b0001111: begin // MISC-MEM
                 if (funct3 == 3'b000) begin
                     // fence: nop
-                end else if (funct3 == 3'b001 && funct12 == 12'h001) begin
+                end else if (funct3 == 3'b001 && inst[31:15] == 17'h00000) begin
                     ctrl_fence_i = 1'b1;
                 end else begin
                     ctrl_illegal = 1'b1;
@@ -297,9 +297,9 @@ module npc_single_cycle (
                         3'b001: begin ctrl_csr_op = `CSR_OP_RW;  dec_has_rs1 = 1'b1; end
                         3'b010: begin ctrl_csr_op = `CSR_OP_RS;  dec_has_rs1 = 1'b1; end
                         3'b011: begin ctrl_csr_op = `CSR_OP_RC;  dec_has_rs1 = 1'b1; end
-                        3'b101: ctrl_csr_op = `CSR_OP_RWI;
-                        3'b110: ctrl_csr_op = `CSR_OP_RSI;
-                        3'b111: ctrl_csr_op = `CSR_OP_RCI;
+                        3'b101: begin ctrl_csr_op = `CSR_OP_RWI; ctrl_imm_sel = `IMM_Z; end
+                        3'b110: begin ctrl_csr_op = `CSR_OP_RSI; ctrl_imm_sel = `IMM_Z; end
+                        3'b111: begin ctrl_csr_op = `CSR_OP_RCI; ctrl_imm_sel = `IMM_Z; end
                         default: ctrl_illegal = 1'b1;
                     endcase
                 end
@@ -488,18 +488,11 @@ module npc_single_cycle (
         // Load alignment / sign extension
         case (ctrl_mem_size)
             `MEM_SIZE_BYTE: begin
-                case (mem_addr[1:0])
-                    2'b00: load_aligned_data = {{24{resp_load_data[7]}},  resp_load_data[7:0]};
-                    2'b01: load_aligned_data = {{24{resp_load_data[15]}}, resp_load_data[15:8]};
-                    2'b10: load_aligned_data = {{24{resp_load_data[23]}}, resp_load_data[23:16]};
-                    2'b11: load_aligned_data = {{24{resp_load_data[31]}}, resp_load_data[31:24]};
-                endcase
+                load_aligned_data = {{24{resp_load_data[7]}}, resp_load_data[7:0]};
                 if (!ctrl_mem_sext) load_aligned_data = load_aligned_data & 32'h000000FF;
             end
             `MEM_SIZE_HALF: begin
-                load_aligned_data = (mem_addr[1] == 1'b0)
-                    ? {{16{resp_load_data[15]}}, resp_load_data[15:0]}
-                    : {{16{resp_load_data[31]}}, resp_load_data[31:16]};
+                load_aligned_data = {{16{resp_load_data[15]}}, resp_load_data[15:0]};
                 if (!ctrl_mem_sext) load_aligned_data = load_aligned_data & 32'h0000FFFF;
             end
             `MEM_SIZE_WORD: begin

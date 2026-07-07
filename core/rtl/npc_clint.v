@@ -37,10 +37,12 @@ module npc_clint (
         if (reset) begin
             mtime <= 64'h0;
         end else begin
-            mtime <= mtime + 64'h1;
             if (req_valid && req_wen) begin
-                if (is_mtime)       mtime[31:0]  <= req_wdata;
-                else if (is_mtimeh) mtime[63:32] <= req_wdata;
+                if (is_mtime)       mtime <= {mtime[63:32], req_wdata} + 64'h1;
+                else if (is_mtimeh) mtime <= {req_wdata, mtime[31:0]} + 64'h1;
+                else                mtime <= mtime + 64'h1;
+            end else begin
+                mtime <= mtime + 64'h1;
             end
         end
     end

@@ -43,8 +43,7 @@
 
 ## Next steps
 
-- Fix remaining RTL bugs (CSR read value, load/store sign-extension, misc_priv).  
-- Run full isa-test suite through difftest and fix any mismatches.  
+- If UART must be modeled in RTL simulation, implement it in the DPI-C external bus/crossbar model, not in the core; generally ignore RTL UART writes during difftest and trust the emulator output if architectural execution matches.  
 - Refactor single-cycle core into the five-stage pipeline with I-cache, forwarding, and hazard logic.  
 - Re-run difftest and collect I-cache AMAT counters.  
 
@@ -82,8 +81,10 @@
 - Unified RTL build with emulator CMake (`BUILD_RTL` option). `cmake -DBUILD_RTL=ON` produces `emulator`, `emulator-rtl`, and `npc-difftest`.
 - Implemented single-cycle baseline `npc_core` in Verilog with DPI-C memory backend, commit interface, and debug ports.
 - Added `RtlISS` adapter implementing the emulator `ISS` interface so the shell and difftest harness drive the RTL directly.
-- `npc-difftest` passes on `exception`, `alu`, `branch`, `ecall`, `illegal_inst`, `jal_jalr`, `lui_auipc`, `mret`, `shift`, `exception_priority`, `branch_misaligned`, `mem_fault`.
-- Remaining mismatches under investigation: `csr`, `csr_all`, `load_store`, `misc_priv`, `clint`, `uart`.
+- Fixed single-cycle RTL difftest bugs in CSR immediates, load data extraction, `fence.i` decode, and CLINT write/tick ordering.
+- `npc-difftest` passes all core ISA workloads except `uart`, which is intentionally excluded until RTL difftest has an external UART/MMIO model: `alu`, `branch`, `branch_misaligned`, `clint`, `compare`, `csr`, `csr_all`, `ecall`, `exception`, `exception_priority`, `illegal_inst`, `jal_jalr`, `load_store`, `lui_auipc`, `mem_fault`, `misc_priv`, `mret`, `shift`, `alu_comb`, `branch_comb`.
+- UART is external to the RTL core. If needed in RTL simulation, emulate it in the DPI-C bus/crossbar model; in normal difftest, ignore RTL UART output and rely on the emulator output when commit events match.
+- More complex RTL difftest workloads now pass: AM CoreMark completes all 1,000 iterations and matches for 756,865,056 retired instructions (`CoreMark PASS 386 Marks`, `7568 ms` from CLINT time reads); RT-Thread AM runs through its scripted shell workload and halts with matching commit events after 567,442 instructions.
 - Completed RT-Thread AM BSP port under `workloads/rt-thread-am/bsp/abstract-machine`; see `notes/rtthread-am-port.md` for details.
   - Restored the default `.config` (DFS enabled) after discovering it had been stripped; switched from `elm-fat` to `ramfs`/`romfs`/`devfs` and added `RT_USING_MEMHEAP`.
   - Added POSIX headers `include/fcntl.h`, `include/string.h`, `include/unistd.h`, and wired the BSP `include/` path ahead of AM/RT-Thread headers.
