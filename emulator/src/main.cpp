@@ -6,6 +6,7 @@
 #include <memory>
 
 #ifdef WITH_RTL
+#include "emulator/difftest.h"
 #include "emulator/rtl_iss.h"
 #endif
 
@@ -16,6 +17,7 @@ static void print_usage(const char* prog) {
               << "Options:\n"
 #ifdef WITH_RTL
               << "  --rtl                 Use the Verilated RTL core as backend\n"
+              << "  --difftest            Compare emulator reference against RTL backend\n"
 #endif
               << "  -f, --file <script>   Execute commands from file\n"
               << "  -e, --exec <cmd>     Execute command string\n"
@@ -34,6 +36,7 @@ int main(int argc, char** argv) {
     std::string script_file;
     std::string exec_cmd;
     bool use_rtl = false;
+    bool use_difftest = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -43,6 +46,8 @@ int main(int argc, char** argv) {
 #ifdef WITH_RTL
         } else if (arg == "--rtl") {
             use_rtl = true;
+        } else if (arg == "--difftest") {
+            use_difftest = true;
 #endif
         } else if ((arg == "-f" || arg == "--file") && i + 1 < argc) {
             script_file = argv[++i];
@@ -70,16 +75,28 @@ int main(int argc, char** argv) {
     }
 
     std::unique_ptr<ISS> iss;
-    if (use_rtl) {
 #ifdef WITH_RTL
-        iss = std::make_unique<RtlISS>(cfg);
-#else
-        std::cerr << "RTL backend not available in this build.\n";
+    if (use_rtl && use_difftest) {
+        std::cerr << "--rtl and --difftest are mutually exclusive.\n";
+        print_usage(argv[0]);
         return 1;
-#endif
+    }
+    if (use_difftest) {
+        iss = std::make_unique<Difftest>(
+            std::make_unique<EmulatorISS>(cfg),
+            std::make_unique<RtlISS>(cfg));
+    } else if (use_rtl) {
+        iss = std::make_unique<RtlISS>(cfg);
     } else {
         iss = std::make_unique<EmulatorISS>(cfg);
     }
+#else
+    if (use_rtl || use_difftest) {
+        std::cerr << "RTL and difftest backends are not available in this build.\n";
+        return 1;
+    }
+    iss = std::make_unique<EmulatorISS>(cfg);
+#endif
 
     Shell shell(std::cin, std::cout, *iss);
 

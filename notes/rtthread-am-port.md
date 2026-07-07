@@ -116,3 +116,12 @@ static const char *months = months_data;
 Emulator output shows the RT-Thread banner, `Hello RISC-V!`, the `msh />`
 prompt, and successful execution of `help`, `date`, `version`, `free`, `ps`,
 `utest_list`, `pwd`, `ls`, `memtrace`, `memcheck`, and finally `halt`.
+
+The same scripted workload also passes unified RTL difftest:
+
+```bash
+../../../../emulator/build-release-rtl/emulator-rtl --difftest \
+  -e "load build/rtthread-riscv32e-npc.bin 0x20000000; run 2000000; exit"
+```
+
+It halts cleanly after 567,442 matched retired instructions.

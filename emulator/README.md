@@ -50,7 +50,20 @@ cmake --build emulator/build -j
 ctest --test-dir emulator/build
 ```
 
-The executable is `emulator/build/emulator`.
+The default executable is `emulator/build/emulator`.
+
+To include the Verilated RTL backend and difftest mode:
+
+```bash
+cmake -S emulator -B emulator/build-rtl -DBUILD_RTL=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build emulator/build-rtl -j
+```
+
+This builds `emulator/build-rtl/emulator-rtl`, which supports the same shell CLI with three backend modes:
+
+- default: interpreter reference (`EmulatorISS`),
+- `--rtl`: Verilated RTL (`RtlISS`),
+- `--difftest`: compare interpreter reference against RTL while exposing the same `ISS` shell interface.
 
 ## Running
 
@@ -75,6 +88,24 @@ The executable is `emulator/build/emulator`.
 ```bash
 ./emulator/build/emulator -e "load firmware.bin 0x20000000; run; exit"
 ```
+
+### RTL and difftest modes
+
+With `BUILD_RTL=ON`, the same command sequence can drive the RTL directly:
+
+```bash
+./emulator/build-rtl/emulator-rtl --rtl \
+  -e "load firmware.bin 0x20000000; run 100000; dump state; exit"
+```
+
+Or run commit-by-commit difftest against the interpreter reference:
+
+```bash
+./emulator/build-rtl/emulator-rtl --difftest \
+  -e "load firmware.bin 0x20000000; run 100000; dump state; exit"
+```
+
+`--difftest` loads programs into both models, compares each retired instruction, and reports the first mismatch on stderr. State-printing commands read back the reference side after successful comparisons.
 
 ## Command Reference
 
@@ -113,6 +144,8 @@ Commands can be separated by semicolons. `#` starts a comment.
 
 | Flag | Default | Meaning |
 |------|---------|---------|
+| `--rtl` | off | Use the RTL backend (`emulator-rtl` only). |
+| `--difftest` | off | Compare interpreter reference against RTL using the shell interface (`emulator-rtl` only). |
 | `--reset-vector <hex>` | `0x20000000` | Reset PC. |
 | `--ram-base <hex>` | `0x20000000` | Start of flat RAM. |
 | `--ram-size <hex>` | `0x00100000` (1 MiB) | RAM size. |
@@ -142,7 +175,7 @@ The emulator reports `"ran N instructions"` after `run` and returns to the shell
 
 ## Checkpoint Format
 
-Checkpoints are binary files with the following layout:
+Interpreter checkpoints are binary files with the following layout:
 
 ```
 Magic   "AIEM"          (4 bytes)
@@ -154,6 +187,8 @@ GPR x[0..15]            (16 x 4 bytes)
 CSRs (mvendorid/marchid/mstatus/mepc/mtvec/mcause) (6 x 4 bytes)
 RAM contents            (ram_size bytes)
 ```
+
+`RtlISS` currently stubs checkpoint save/restore, and difftest checkpoints are intentionally unimplemented because a correct snapshot must include both the reference and RTL model state. These modes print a warning and return failure for checkpoint commands.
 
 ## Testing
 
@@ -178,5 +213,5 @@ The test executable is `emulator/build/tests/emulator_test`.
 ## Future Work
 
 - Spike adapter for a third reference opinion.
-- Verilator RTL adapter sharing the `ISS` interface (difftest harness already in place).
 - Shared-clock mode for timing-sensitive difftests.
+- Full RTL and difftest checkpoint save/restore.

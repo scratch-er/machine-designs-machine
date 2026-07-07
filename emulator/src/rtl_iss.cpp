@@ -5,6 +5,7 @@
 #include <verilated.h>
 #include <verilated_vcd_c.h>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <vector>
 #include "Vnpc_core.h"
@@ -28,6 +29,7 @@ public:
 
         top_->clock = 0;
         top_->reset = 1;
+        reset(cfg_.reset_vector);
     }
 
     ~Impl() {
@@ -131,13 +133,13 @@ public:
 
     bool save_checkpoint(const std::string& path) {
         (void)path;
-        // Full RTL checkpoint restore is deferred. Reading architectural state
-        // back through debug ports is possible but not yet implemented.
+        std::cerr << "warning: RTL checkpoints are not implemented\n";
         return false;
     }
 
     bool load_checkpoint(const std::string& path) {
         (void)path;
+        std::cerr << "warning: RTL checkpoints are not implemented\n";
         return false;
     }
 

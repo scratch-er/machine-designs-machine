@@ -8,10 +8,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(BUILD_TESTS "Build emulator unit tests" ON)
 option(BUILD_RTL "Build RTL simulation targets" OFF)
 
-add_compile_options(-Wall -Wextra -Wpedantic)
+set(EMULATOR_COMPILE_OPTIONS -Wall -Wextra -Wpedantic)
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    add_compile_options(-O2 -Werror)
+    list(APPEND EMULATOR_COMPILE_OPTIONS -O2 -Werror)
 endif()
+
+function(emulator_apply_compile_options target)
+    target_compile_options(${target} PRIVATE ${EMULATOR_COMPILE_OPTIONS})
+endfunction()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -29,9 +33,11 @@ set(EMULATOR_SOURCES
 )
 
 add_library(emulator_lib STATIC ${EMULATOR_SOURCES})
+emulator_apply_compile_options(emulator_lib)
 
 # Interpreter binary (always built).
 add_executable(emulator src/main.cpp)
+emulator_apply_compile_options(emulator)
 target_link_libraries(emulator emulator_lib)
 
 # Optional RTL simulation targets.
@@ -70,11 +76,13 @@ if(BUILD_RTL)
 
     # emulator-rtl: same CLI as emulator, but drives the RTL core.
     add_executable(emulator-rtl src/main.cpp)
+    emulator_apply_compile_options(emulator-rtl)
     target_compile_definitions(emulator-rtl PRIVATE WITH_RTL)
     target_link_libraries(emulator-rtl emulator_lib rtl_iss)
 
     # npc-difftest: compare emulator reference against RTL DUT.
     add_executable(npc-difftest src/difftest_main.cpp)
+    emulator_apply_compile_options(npc-difftest)
     target_link_libraries(npc-difftest emulator_lib rtl_iss)
 endif()
 

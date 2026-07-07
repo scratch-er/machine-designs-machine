@@ -7,27 +7,28 @@ This document describes the internal architecture of the reference emulator for 
 1. **Correctness first** — match `specs/core.md` and the RISC-V ISA manual exactly.
 2. **Observability** — expose every architectural event needed for difftest.
 3. **Scriptability** — run interactively or from files/commands.
-4. **Extensibility** — share the `ISS` interface with a future Verilator RTL adapter.
+4. **Extensibility** — share the `ISS` interface across the interpreter, Verilator RTL, and difftest adapter.
 
 ## Component Overview
 
 ```
-+----------------------------------+
-|              Shell               |
-+----------------------------------+
-|               ISS                |  (abstract interface)
-+----------------------------------+
-|           EmulatorISS            |
-+-------+------+---------+---------+
-| Hart  |Memory|  Clint  |  Uart   |
-+-------+------+---------+---------+
-|        Trace / Config            |
-+----------------------------------+
++------------------------------------------------+
+|                     Shell                      |
++------------------------------------------------+
+|                      ISS                       |  (abstract interface)
++-------------+----------------+-----------------+
+| EmulatorISS |     RtlISS     |    Difftest     |
+|             |                | ref ISS + DUT ISS|
++-------+-----+-----+----------+-----------------+
+| Hart  | Memory/MMIO | Verilated npc_core       |
++-------+-------------+--------------------------+
+|              Trace / Config                    |
++------------------------------------------------+
 ```
 
 ## `ISS` Interface
 
-`include/emulator/iss.h` defines the contract shared by all execution engines. The reference interpreter implements it today; the RTL Verilator adapter will implement it later.
+`include/emulator/iss.h` defines the contract shared by all execution engines. `EmulatorISS`, `RtlISS`, and `Difftest` all implement it, so the shell can drive the interpreter, RTL simulation, or commit-by-commit comparison with the same command sequence.
 
 Key methods:
 
@@ -125,13 +126,21 @@ R=<retire_idx> C=<cycle> PC=<pc> I=<inst> RD=<rd> RV=<value> NPC=<next_pc> EXC=<
 
 This format is designed to be diffed against an RTL trace log.
 
-## Difftest Preparation
+## Difftest ISS Adapter
 
-The emulator already produces `CommitEvent`s. The `Difftest` class in `src/difftest.cpp` compares two `ISS` instances instruction-by-instruction and reports the first mismatch. It is self-tested in `emulator/tests/test_main.cpp` with two identical `EmulatorISS` instances.
+The emulator and RTL both produce `CommitEvent`s. `Difftest` in `src/difftest.cpp` wraps two `ISS` instances, usually an `EmulatorISS` reference and an `RtlISS` DUT, and implements `ISS` itself.
 
-A future `RtlISS` will implement the same `ISS` interface, drive Verilator and the AXI memory model, and return one `CommitEvent` per retired instruction. The harness can then compare the emulator reference against the RTL DUT with no changes to the comparison logic.
+`Difftest::step_inst()` advances both sides by one retired instruction, compares the commit events, and returns the reference event to the shell. On mismatch, asymmetric halt, or DUT timeout, it records `last_mismatch()`, prints a concise diagnostic to stderr, marks itself failed, and stops. State queries (`pc`, `reg`, `csr`, `read_mem`) return the reference side after successful comparisons.
 
-See `notes/difftest-design.md` for the full plan.
+Program loading and direct memory writes are applied to both sides. Checkpointing is intentionally not implemented for difftest because a correct snapshot must include both model states; checkpoint commands print a warning and fail in this mode.
+
+The unified RTL-capable CLI is `emulator-rtl`:
+
+- default mode: interpreter reference,
+- `--rtl`: RTL backend,
+- `--difftest`: reference-vs-RTL difftest backend.
+
+See `notes/difftest-design.md` for the original design notes.
 
 ## Adding a New Instruction
 

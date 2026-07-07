@@ -91,3 +91,5 @@
   - Fixed `Makefile` so `rtconfig.h` is regenerated when `.config` changes, and removed the broken Python injection of `extra.h`.
   - Implemented `halt` MSH command and extended the UART-fed command sequence with `pwd`, `ls`, `memtrace`, `memcheck`; all execute and `halt` stops the emulator cleanly.
   - Also fixed an alignment bug in `components/libc/compilers/common/ctime.c`: `asctime_r` used `*(int*)` reads on the `days`/`months` string literals, which were not guaranteed 4-byte aligned in this BSP's rodata layout. Changed the declarations to use separately aligned arrays.
+- Fixed emulator Release builds with and without `BUILD_RTL`: warning flags are now target-scoped so `-Werror` still applies to project targets but no longer breaks Verilator-generated/system sources.
+- Refactored difftest to implement `ISS`; `emulator-rtl --difftest` now accepts the same shell command sequences as interpreter/RTL modes. RT-Thread AM passes unified difftest through `halt` after 567,442 matched instructions.

@@ -5,6 +5,7 @@
 #include "emulator/difftest.h"
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <string>
 
 using namespace emulator;
@@ -498,19 +499,24 @@ static void test_clint() {
 // --- Difftest self-test ------------------------------------------------------
 
 static void test_difftest_match() {
-    EmulatorISS ref;
-    EmulatorISS dut;
-    // Program: addi x1, x0, 7; addi x2, x1, 3; ebreak
-    ref.write_mem(0x20000000, 4, encode_i(OPCODE_OP_IMM, 0, 1, 0, 7));
-    ref.write_mem(0x20000004, 4, encode_i(OPCODE_OP_IMM, 0, 2, 1, 3));
-    ref.write_mem(0x20000008, 4, 0x00100073); // ebreak
-    dut.write_mem(0x20000000, 4, encode_i(OPCODE_OP_IMM, 0, 1, 0, 7));
-    dut.write_mem(0x20000004, 4, encode_i(OPCODE_OP_IMM, 0, 2, 1, 3));
-    dut.write_mem(0x20000008, 4, 0x00100073); // ebreak
+    auto ref = std::make_unique<EmulatorISS>();
+    auto dut = std::make_unique<EmulatorISS>();
+    Difftest diff(std::move(ref), std::move(dut));
 
-    Difftest diff(&ref, &dut);
+    // Program: addi x1, x0, 7; addi x2, x1, 3; ebreak
+    diff.write_mem(0x20000000, 4, encode_i(OPCODE_OP_IMM, 0, 1, 0, 7));
+    diff.write_mem(0x20000004, 4, encode_i(OPCODE_OP_IMM, 0, 2, 1, 3));
+    diff.write_mem(0x20000008, 4, 0x00100073); // ebreak
+
+    CommitEvent ev;
+    CHECK(diff.step_inst(ev));
+    CHECK(ev.rd == 1 && ev.rd_value == 7);
+    CHECK(diff.reg(1) == 7);
     CHECK(diff.run(10));
     CHECK(diff.retire_index() == 3);
+    CHECK(!diff.failed());
+    CHECK(!diff.save_checkpoint("unused.chk"));
+    CHECK(!diff.load_checkpoint("unused.chk"));
 }
 
 static void test_difftest_mismatch_detected() {
@@ -521,7 +527,9 @@ static void test_difftest_mismatch_detected() {
     dut.write_mem(0x20000000, 4, encode_i(OPCODE_OP_IMM, 0, 1, 0, 8));
 
     Difftest diff(&ref, &dut);
-    CHECK(!diff.run(10));
+    CommitEvent ev;
+    CHECK(!diff.step_inst(ev));
+    CHECK(diff.failed());
     CHECK(!diff.last_mismatch().empty());
 }
 
