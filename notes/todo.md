@@ -9,6 +9,7 @@
 - Emulator design written in `notes/emulator-design.md`.
 - Difftest design written in `notes/difftest-design.md`.
 - Core design written in `notes/core-design.md`.
+- Detailed datapath and control-signal plan added to `notes/core-design.md` (single-cycle baseline + 5-stage pipeline).
 - Overall plan updated in `notes/plan.md`.
 
 ## Reminders for future work
@@ -42,9 +43,21 @@
 
 ## Next steps
 
-- Begin processor core design (M4): choose microarchitecture, implement single-cycle or pipelined RV32E_Zicsr in Verilog.
-- Use the difftest harness to compare RTL against the emulator (M5).
-- Defer: GoogleTest migration, watchpoints, in-memory snapshots, Spike adapter, real AM interrupts, multi-core.
+- Fix remaining RTL bugs (CSR read value, load/store sign-extension, misc_priv).  
+- Run full isa-test suite through difftest and fix any mismatches.  
+- Refactor single-cycle core into the five-stage pipeline with I-cache, forwarding, and hazard logic.  
+- Re-run difftest and collect I-cache AMAT counters.  
+
+## Deferred
+
+- GoogleTest migration, watchpoints, in-memory snapshots, Spike adapter, real AM interrupts, multi-core.
+- Advanced branch prediction, clock gating, cache size exploration.
+- Full RTL checkpoint save/restore.
+
+## Deferred
+
+- GoogleTest migration, watchpoints, in-memory snapshots, Spike adapter, real AM interrupts, multi-core.
+- Advanced branch prediction, clock gating, cache size exploration.
 
 ## Recent notes
 
@@ -64,7 +77,13 @@
   - Added shim headers `klib/include/{stdio.h,stdlib.h,string.h}` so AM kernels can include standard headers.
   - `klib/include/klib.h` now declares `putchar`/`puts`.
   - `workloads/am-kernels/kernels/demo` builds and reaches its menu.
-- Updated `notes/emulator-design.md` with the new shell commands, trace filters, and difftest harness.
+- Updated `notes/core-design.md` with the complete datapath, control-signal, pipeline, and AXI plan before writing RTL.
+- Chose a 5-stage pipeline with static not-taken prediction, flip-flop I-cache, and shared AXI4 master for the full implementation; the first RTL milestone will be a single-cycle baseline for fast difftest bring-up.
+- Unified RTL build with emulator CMake (`BUILD_RTL` option). `cmake -DBUILD_RTL=ON` produces `emulator`, `emulator-rtl`, and `npc-difftest`.
+- Implemented single-cycle baseline `npc_core` in Verilog with DPI-C memory backend, commit interface, and debug ports.
+- Added `RtlISS` adapter implementing the emulator `ISS` interface so the shell and difftest harness drive the RTL directly.
+- `npc-difftest` passes on `exception`, `alu`, `branch`, `ecall`, `illegal_inst`, `jal_jalr`, `lui_auipc`, `mret`, `shift`, `exception_priority`, `branch_misaligned`, `mem_fault`.
+- Remaining mismatches under investigation: `csr`, `csr_all`, `load_store`, `misc_priv`, `clint`, `uart`.
 - Completed RT-Thread AM BSP port under `workloads/rt-thread-am/bsp/abstract-machine`; see `notes/rtthread-am-port.md` for details.
   - Restored the default `.config` (DFS enabled) after discovering it had been stripped; switched from `elm-fat` to `ramfs`/`romfs`/`devfs` and added `RT_USING_MEMHEAP`.
   - Added POSIX headers `include/fcntl.h`, `include/string.h`, `include/unistd.h`, and wired the BSP `include/` path ahead of AM/RT-Thread headers.

@@ -3,14 +3,22 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <memory>
+
+#ifdef WITH_RTL
+#include "emulator/rtl_iss.h"
+#endif
 
 using namespace emulator;
 
 static void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " [options]\n"
               << "Options:\n"
-              << "  -f, --file <script>    Execute commands from file\n"
-              << "  -e, --exec <cmd>      Execute command string\n"
+#ifdef WITH_RTL
+              << "  --rtl                 Use the Verilated RTL core as backend\n"
+#endif
+              << "  -f, --file <script>   Execute commands from file\n"
+              << "  -e, --exec <cmd>     Execute command string\n"
               << "  --reset-vector <addr> Set reset vector (hex)\n"
               << "  --ram-base <addr>     Set RAM base (hex)\n"
               << "  --ram-size <size>     Set RAM size (hex)\n"
@@ -25,12 +33,17 @@ int main(int argc, char** argv) {
     Config cfg;
     std::string script_file;
     std::string exec_cmd;
+    bool use_rtl = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
             print_usage(argv[0]);
             return 0;
+#ifdef WITH_RTL
+        } else if (arg == "--rtl") {
+            use_rtl = true;
+#endif
         } else if ((arg == "-f" || arg == "--file") && i + 1 < argc) {
             script_file = argv[++i];
         } else if ((arg == "-e" || arg == "--exec") && i + 1 < argc) {
@@ -56,8 +69,19 @@ int main(int argc, char** argv) {
         }
     }
 
-    EmulatorISS iss(cfg);
-    Shell shell(std::cin, std::cout, iss);
+    std::unique_ptr<ISS> iss;
+    if (use_rtl) {
+#ifdef WITH_RTL
+        iss = std::make_unique<RtlISS>(cfg);
+#else
+        std::cerr << "RTL backend not available in this build.\n";
+        return 1;
+#endif
+    } else {
+        iss = std::make_unique<EmulatorISS>(cfg);
+    }
+
+    Shell shell(std::cin, std::cout, *iss);
 
     if (!script_file.empty()) {
         if (!shell.run_file(script_file)) {
