@@ -1,4 +1,4 @@
-ARCH ?= native
+ARCH ?= riscv32e-npc
 AM_APPS_MK = build/${ARCH}/am-apps.mk
 FILE_MK = files.mk
 FILE_TMP = .tmp.$(FILE_MK)
@@ -6,17 +6,25 @@ RTCONFIG_H = rtconfig.h
 
 NAME = rtthread
 SRCS = $(shell find src -name "*.c")
-CFLAGS += -DHAVE_CCONFIG_H -D__RTTHREAD__
-CFLAGS += -Wno-nonnull-compare
-LDFLAGS += -T extra.ld
+CFLAGS += -DHAVE_CCONFIG_H -D__RTTHREAD__ -DRT_USING_LIBC
+# BSP include directory must precede AM/RT-Thread headers so we can supply
+# missing declarations (string.h, unistd.h, fcntl.h, etc.).
+CFLAGS += -Iinclude
 -include $(FILE_MK)
--include $(AM_APPS_MK)
+ifneq ($(wildcard $(AM_APPS_MK)),)
+  -include $(AM_APPS_MK)
+endif
 include $(AM_HOME)/Makefile
+# extra.ld must be added after the AM Makefile, because the arch-specific
+# config (scripts/riscv32e-npc.mk) resets LDFLAGS with :=.
+LDSCRIPTS += extra.ld
+LDFLAGS += -T extra.ld
 
-$(RTCONFIG_H):
+# DFS needs the libc extension headers (e.g. sys/stat.h).
+CFLAGS += -I../../components/libc/compilers/common/extension
+$(RTCONFIG_H): .config
 	touch $@
 	scons --useconfig=.config
-	if [ "`sed -n '3p' $@`"x = x ]; then sed -i -e '2a#include "extra.h"' $@; fi
 
 init: $(RTCONFIG_H)
 	scons -c

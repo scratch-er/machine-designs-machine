@@ -1049,7 +1049,7 @@ static rt_err_t rt_serial_control(struct rt_device *dev,
         case RT_DEVICE_CTRL_CONSOLE_OFLAG:
             if (args)
             {
-                *(rt_uint16_t*)args = RT_DEVICE_FLAG_RDWR | RT_DEVICE_FLAG_INT_RX | RT_DEVICE_FLAG_STREAM;
+                *(rt_uint16_t*)args = RT_DEVICE_FLAG_RDWR | RT_DEVICE_FLAG_STREAM;
             }
             break;
 #ifdef RT_USING_POSIX_STDIO

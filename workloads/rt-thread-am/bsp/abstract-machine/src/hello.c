@@ -1,5 +1,5 @@
-#include <klib.h>
 #include <rtthread.h>
+#include <klib.h>
 
 static int hello() {
   printf("Hello RISC-V!\n");

@@ -1,5 +1,3 @@
-typedef long suseconds_t;
-typedef unsigned long useconds_t;
 #include <sys/types.h>
 
 #ifdef __ISA_NATIVE__

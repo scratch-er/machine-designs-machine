@@ -37,7 +37,7 @@ static int _uart_putc(struct rt_serial_device *serial, char c) {
 }
 
 static int _uart_getc(struct rt_serial_device *serial) {
-  static const char *p = "help\ndate\nversion\nfree\nps\npwd\nls\nmemtrace\nmemcheck\nutest_list\n";
+  static const char *p = "help\ndate\nversion\nfree\nps\nutest_list\npwd\nls\nmemtrace\nmemcheck\nhalt\n";
   return (*p != '\0' ? *(p ++) : -1);
 }
 
@@ -76,4 +76,12 @@ int rt_hw_uart_init(void) {
 /* WEAK for SDK 0.5.6 */
 rt_weak void uart_debug_init(int uart_channel)
 {
+}
+
+/* Fallback console output used by rt_kprintf before the serial device is up. */
+void rt_hw_console_output(const char *str)
+{
+  while (*str) {
+    putch(*str++);
+  }
 }

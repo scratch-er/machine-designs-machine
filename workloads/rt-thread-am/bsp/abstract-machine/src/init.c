@@ -3,6 +3,14 @@
 #include <klib.h>
 #include <klib-macros.h>
 
+/* Weak stubs for section boundary symbols that may be empty when optional
+ * features (AM apps, finsh symbol tables, utest) are not integrated. */
+__attribute__((weak)) char __am_apps_data_start, __am_apps_data_end;
+__attribute__((weak)) char __am_apps_bss_start,  __am_apps_bss_end;
+__attribute__((weak)) char __fsymtab_start, __fsymtab_end;
+__attribute__((weak)) char __vsymtab_start, __vsymtab_end;
+__attribute__((weak)) char __rt_utest_tc_tab_start, __rt_utest_tc_tab_end;
+
 #define AM_APPS_HEAP_SIZE  0x2000000
 #define RT_HW_HEAP_BEGIN heap.start
 #define RT_HW_HEAP_END heap.end

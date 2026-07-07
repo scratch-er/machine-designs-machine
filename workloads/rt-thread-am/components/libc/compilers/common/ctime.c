@@ -65,8 +65,10 @@ static const short __spm[13] =
     (31 + 28 + 31 + 30 + 31 + 30 + 31 + 31 + 30 + 31 + 30 + 31),
 };
 
-rt_align(RT_ALIGN_SIZE) static const char *days = "Sun Mon Tue Wed Thu Fri Sat ";
-rt_align(RT_ALIGN_SIZE) static const char *months = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec ";
+rt_align(4) static const char days_data[] = "Sun Mon Tue Wed Thu Fri Sat ";
+static const char *days = days_data;
+rt_align(4) static const char months_data[] = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec ";
+static const char *months = months_data;
 
 static int __isleap(int year)
 {

@@ -1,5 +1,6 @@
 SECTIONS {
-  .data.extra : {
+  .rodata.extra : {
+    . = ALIGN(8);
     /* section information for finsh shell */
     __fsymtab_start = .;
     KEEP(*(FSymTab))
@@ -10,17 +11,33 @@ SECTIONS {
     __vsymtab_end = .;
     . = ALIGN(8);
 
-    /* section information for initial. */
-    . = ALIGN(8);
+    /* section information for initial.
+     * ld.lld's SORT() does not reliably order these by level, so list the
+     * standard RT-Thread init sections explicitly. */
     __rt_init_start = .;
-    KEEP(*(SORT(.rti_fn*)))
+    KEEP(*(.rti_fn.0))
+    KEEP(*(.rti_fn.0.end))
+    KEEP(*(.rti_fn.1))
+    KEEP(*(.rti_fn.1.end))
+    KEEP(*(.rti_fn.2))
+    KEEP(*(.rti_fn.3))
+    KEEP(*(.rti_fn.4))
+    KEEP(*(.rti_fn.5))
+    KEEP(*(.rti_fn.6))
+    KEEP(*(.rti_fn.6.end))
     __rt_init_end = .;
     . = ALIGN(8);
 
     __rt_utest_tc_tab_start = .;
     KEEP(*(UtestTcTab))
     __rt_utest_tc_tab_end = .;
+    . = ALIGN(8);
+  }
+}
+INSERT AFTER .rodata;
 
+SECTIONS {
+  .data.extra : {
     . = ALIGN(8);
     __am_apps_data_start = .;
     *(__am_apps.data*)

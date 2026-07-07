@@ -65,3 +65,9 @@
   - `klib/include/klib.h` now declares `putchar`/`puts`.
   - `workloads/am-kernels/kernels/demo` builds and reaches its menu.
 - Updated `notes/emulator-design.md` with the new shell commands, trace filters, and difftest harness.
+- Completed RT-Thread AM BSP port under `workloads/rt-thread-am/bsp/abstract-machine`; see `notes/rtthread-am-port.md` for details.
+  - Restored the default `.config` (DFS enabled) after discovering it had been stripped; switched from `elm-fat` to `ramfs`/`romfs`/`devfs` and added `RT_USING_MEMHEAP`.
+  - Added POSIX headers `include/fcntl.h`, `include/string.h`, `include/unistd.h`, and wired the BSP `include/` path ahead of AM/RT-Thread headers.
+  - Fixed `Makefile` so `rtconfig.h` is regenerated when `.config` changes, and removed the broken Python injection of `extra.h`.
+  - Implemented `halt` MSH command and extended the UART-fed command sequence with `pwd`, `ls`, `memtrace`, `memcheck`; all execute and `halt` stops the emulator cleanly.
+  - Also fixed an alignment bug in `components/libc/compilers/common/ctime.c`: `asctime_r` used `*(int*)` reads on the `days`/`months` string literals, which were not guaranteed 4-byte aligned in this BSP's rodata layout. Changed the declarations to use separately aligned arrays.
