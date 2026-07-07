@@ -463,25 +463,30 @@ core/
 ├── rtl/
 │   ├── npc_defines.vh          # parameters, opcodes, causes
 │   ├── npc_core.v              # top module + AXI slave tie-offs + debug ports
-│   ├── npc_single_cycle.v      # single-cycle datapath (Phase 1)
+│   ├── npc_single_cycle.v      # single-cycle state, exception, writeback, commit owner
+│   ├── npc_decoder.v           # RV32E_Zicsr decode and control signals
+│   ├── npc_imm.v               # immediate generation
+│   ├── npc_alu.v               # integer ALU
+│   ├── npc_branch.v            # branch/jump target and condition logic
+│   ├── npc_load_store_unit.v   # address, alignment, load/store data formatting
 │   ├── npc_regfile.v           # 16-entry register file
 │   ├── npc_csr_file.v          # CSR read/write
 │   ├── npc_clint.v             # mtime/mtimeh
 │   ├── npc_memory_dpi.v        # DPI-C memory wrapper
-│   ├── npc_if_stage.v          # PC, I-cache, fetch FSM (Phase 2)
-│   ├── npc_id_stage.v          # decoder, regfile read, hazard unit
-│   ├── npc_ex_stage.v          # ALU, branch/jump resolver
-│   ├── npc_mem_stage.v         # data memory, CSR file, CLINT, exceptions
-│   ├── npc_wb_stage.v          # writeback and commit interface
-│   ├── npc_icache.v            # flip-flop instruction cache
-│   └── npc_axi_master.v        # shared AXI4 master arbiter
+│   ├── npc_if_stage.v          # future PC, I-cache, fetch FSM (pipeline)
+│   ├── npc_id_stage.v          # future pipeline ID stage
+│   ├── npc_ex_stage.v          # future pipeline EX stage
+│   ├── npc_mem_stage.v         # future pipeline MEM stage
+│   ├── npc_wb_stage.v          # future pipeline WB stage
+│   ├── npc_icache.v            # future flip-flop instruction cache
+│   └── npc_axi_master.v        # future shared AXI4 master arbiter
 ├── dpi/
 │   └── npc_memory_dpi.cpp      # C++ implementation of DPI memory functions
 └── tb/
     └── ...                     # Verilator testbench (M5)
 ```
 
-For Phase 1 the single-cycle core is implemented as `npc_core.v` + `npc_single_cycle.v` + `npc_regfile.v` + `npc_csr_file.v` + `npc_clint.v` + `npc_memory_dpi.v`. The DPI-C layer uses the emulator's `Memory` backend. Stage modules and the AXI master are introduced in Phase 2.
+For the current Phase 1 refactored baseline, `npc_core.v` instantiates `npc_single_cycle.v` and `npc_memory_dpi.v`. `npc_single_cycle.v` owns architectural state, exceptions, writeback, and commit capture while using `npc_decoder.v`, `npc_imm.v`, `npc_alu.v`, `npc_branch.v`, `npc_load_store_unit.v`, `npc_regfile.v`, `npc_csr_file.v`, and `npc_clint.v`. The DPI-C layer still uses the emulator's `Memory` backend. AXI, I-cache, and pipeline stage modules are introduced in later phases.
 
 The emulator adapter lives in `emulator/`:
 
@@ -505,21 +510,40 @@ The single-cycle baseline is expected to have poor Fmax; it exists only for corr
 
 ## Development Order
 
-1. Create `core/rtl/`, `core/dpi/`, and `npc_defines.vh`.
-2. Implement the DPI-C memory wrapper and C++ backend.
-3. Implement the emulator `RtlISS` adapter that drives Verilator.
-4. Implement the single-cycle `npc_core` using DPI-C memory, with debug/commit ports.
-5. Build with Verilator and sanity-test the simulation flow.
-6. Run difftest against `EmulatorISS` on the existing workload suite.
-7. Refactor into the five-stage pipeline:
+The current single-cycle RTL is already useful as a difftest baseline, so the next work should avoid changing datapath structure, memory protocol, and pipeline timing at the same time. The safe order is:
+
+1. Refactor the single-cycle core into reusable combinational modules while preserving the existing DPI-memory behavior.
+   - Extract decoder, immediate generation, ALU, branch/jump, and load/store alignment helpers.
+   - Keep `npc_single_cycle.v` as the owner of PC, halt state, regfile, CSR file, CLINT, exception priority, and commit capture.
+   - Rebuild and rerun existing RTL difftest; this milestone should not change retire events.
+2. Add a cycle-accurate AXI memory model in `RtlISS` while keeping `emulator::Memory` as the authoritative storage.
+   - Drive the Verilated `io_master_*` ready/valid/data/response inputs each cycle from C++.
+   - Preserve fault injection through `SLVERR`/`DECERR` equivalents.
+   - Keep UART/MMIO outside the core in the external AXI simulation model if needed.
+3. Switch the non-pipelined core from direct DPI memory ports to the real AXI master path.
+   - Add `npc_axi_master.v` for one in-flight transaction.
+   - Convert instruction fetch/load/store to request/response timing.
+   - Keep CLINT internal and intercept CLINT accesses before external AXI.
+4. Add `npc_icache.v` and AXI burst fills before pipelining.
+   - Implement the required 2-line, direct-mapped, 16-byte-line flip-flop I-cache.
+   - Implement `fence.i` by invalidating the cache.
+   - Add Verilator-visible I-cache AMAT counters.
+5. Refactor into the five-stage pipeline:
    - `npc_if_stage` + `npc_icache`.
    - `npc_id_stage` + `npc_regfile`.
    - `npc_ex_stage`.
    - `npc_mem_stage` + `npc_csr_file` + `npc_clint`.
    - `npc_wb_stage`.
    - `npc_axi_master` arbiter.
-8. Add hazard/forwarding logic and re-run difftest.
-9. Add I-cache AMAT counters and benchmark.
+6. Add forwarding, stalls, flushes, precise exception handling, and rerun difftest after each sub-step.
+7. Run larger AM/RT-Thread workloads, inspect AXI/cache VCD traces, collect I-cache AMAT counters, and update notes.
+
+Important constraints:
+
+- Do not put UART inside the processor core; model it in the external simulation memory/MMIO layer if RTL UART visibility is needed.
+- Keep CLINT inside the core and ticking once per RTL clock cycle.
+- Keep AXI slave ports tied off and `io_interrupt` unused until the spec changes.
+- Do not remove the current DPI-memory fallback until the AXI simulation path has passed the current regression set.
 
 ## Open Questions / Decisions
 

@@ -11,25 +11,25 @@ module npc_single_cycle (
     input              reset,
 
     // Instruction fetch interface (combinational read)
-    output reg         req_fetch_valid,
-    output reg [31:0]  req_fetch_addr,
+    output             req_fetch_valid,
+    output     [31:0]  req_fetch_addr,
     input      [31:0]  resp_fetch_inst,
     input              resp_fetch_fault,
     input              resp_fetch_misaligned,
 
     // Data load interface (combinational read)
-    output reg         req_load_valid,
-    output reg [31:0]  req_load_addr,
-    output reg [1:0]   req_load_size,
+    output             req_load_valid,
+    output     [31:0]  req_load_addr,
+    output     [1:0]   req_load_size,
     input      [31:0]  resp_load_data,
     input              resp_load_fault,
     input              resp_load_misaligned,
 
     // Data store interface (registered write)
-    output reg         req_store_valid,
-    output reg [31:0]  req_store_addr,
-    output reg [1:0]   req_store_size,
-    output reg [31:0]  req_store_data,
+    output             req_store_valid,
+    output     [31:0]  req_store_addr,
+    output     [1:0]   req_store_size,
+    output     [31:0]  req_store_data,
     input              resp_store_fault,
     input              resp_store_misaligned,
 
@@ -68,246 +68,74 @@ module npc_single_cycle (
     localparam [31:0] CAUSE_ECALL_M           = 32'd11;
 
     //==========================================================================
-    // Instruction fields
+    // Decode
     //==========================================================================
     wire [31:0] inst = resp_fetch_inst;
-    wire [6:0]  opcode = inst[6:0];
-    wire [2:0]  funct3 = inst[14:12];
-    wire [6:0]  funct7 = inst[31:25];
-    wire [11:0] funct12 = inst[31:20];
-    wire [4:0]  rd5  = inst[11:7];
-    wire [4:0]  rs15 = inst[19:15];
-    wire [4:0]  rs25 = inst[24:20];
-    wire [3:0]  inst_rd  = rd5[3:0];
-    wire [3:0]  inst_rs1 = rs15[3:0];
-    wire [3:0]  inst_rs2 = rs25[3:0];
-    wire [11:0] inst_csr = inst[31:20];
+    wire [4:0]  rd5;
+    wire [4:0]  rs15;
+    wire [4:0]  rs25;
+    wire [3:0]  inst_rd;
+    wire [3:0]  inst_rs1;
+    wire [3:0]  inst_rs2;
+    wire [11:0] inst_csr;
 
-    //==========================================================================
-    // Decoder
-    //==========================================================================
-    reg         ctrl_illegal;
-    reg         ctrl_ecall;
-    reg         ctrl_ebreak;
-    reg         ctrl_mret;
-    reg         ctrl_wfi;
-    reg         ctrl_fence_i;
-    reg  [3:0]  ctrl_alu_op;
-    reg  [1:0]  ctrl_alu_src_a;
-    reg         ctrl_alu_src_b;
-    reg  [2:0]  ctrl_imm_sel;
-    reg         ctrl_reg_write;
-    reg         ctrl_mem_read;
-    reg         ctrl_mem_write;
-    reg  [1:0]  ctrl_mem_size;
-    reg         ctrl_mem_sext;
-    reg  [2:0]  ctrl_branch_type;
-    reg         ctrl_jump;
-    reg         ctrl_jump_reg;
-    reg  [2:0]  ctrl_csr_op;
-    reg         ctrl_csr_src;
+    wire        ctrl_illegal;
+    wire        ctrl_ecall;
+    wire        ctrl_ebreak;
+    wire        ctrl_mret;
+    wire        ctrl_wfi;
+    wire        ctrl_fence_i;
+    wire [3:0]  ctrl_alu_op;
+    wire [1:0]  ctrl_alu_src_a;
+    wire        ctrl_alu_src_b;
+    wire [2:0]  ctrl_imm_sel;
+    wire        ctrl_reg_write;
+    wire        ctrl_mem_read;
+    wire        ctrl_mem_write;
+    wire [1:0]  ctrl_mem_size;
+    wire        ctrl_mem_sext;
+    wire [2:0]  ctrl_branch_type;
+    wire        ctrl_jump;
+    wire        ctrl_jump_reg;
+    wire [2:0]  ctrl_csr_op;
+    wire        ctrl_csr_src;
+    wire        dec_has_rd;
+    wire        dec_has_rs1;
+    wire        dec_has_rs2;
 
-    reg dec_has_rd;
-    reg dec_has_rs1;
-    reg dec_has_rs2;
-
-    always @(*) begin
-        // Defaults
-        ctrl_illegal    = 1'b0;
-        ctrl_ecall      = 1'b0;
-        ctrl_ebreak     = 1'b0;
-        ctrl_mret       = 1'b0;
-        ctrl_wfi        = 1'b0;
-        ctrl_fence_i    = 1'b0;
-        ctrl_alu_op     = `ALU_ADD;
-        ctrl_alu_src_a  = `ALU_A_RS1;
-        ctrl_alu_src_b  = `ALU_B_IMM;
-        ctrl_imm_sel    = `IMM_I;
-        ctrl_reg_write  = 1'b0;
-        ctrl_mem_read   = 1'b0;
-        ctrl_mem_write  = 1'b0;
-        ctrl_mem_size   = `MEM_SIZE_BYTE;
-        ctrl_mem_sext   = 1'b0;
-        ctrl_branch_type= `BR_NONE;
-        ctrl_jump       = 1'b0;
-        ctrl_jump_reg   = 1'b0;
-        ctrl_csr_op     = `CSR_OP_NONE;
-        ctrl_csr_src    = `CSR_SRC_RS1;
-        dec_has_rd      = 1'b0;
-        dec_has_rs1     = 1'b0;
-        dec_has_rs2     = 1'b0;
-
-        case (opcode)
-            7'b0010011: begin // OP-IMM
-                dec_has_rd  = 1'b1;
-                dec_has_rs1 = 1'b1;
-                ctrl_reg_write = 1'b1;
-                case (funct3)
-                    3'b000: ctrl_alu_op = `ALU_ADD;
-                    3'b010: ctrl_alu_op = `ALU_SLT;
-                    3'b011: ctrl_alu_op = `ALU_SLTU;
-                    3'b100: ctrl_alu_op = `ALU_XOR;
-                    3'b110: ctrl_alu_op = `ALU_OR;
-                    3'b111: ctrl_alu_op = `ALU_AND;
-                    3'b001: ctrl_alu_op = (funct7 == 7'b0000000) ? `ALU_SLL : `ALU_ADD;
-                    3'b101: begin
-                        if (funct7 == 7'b0000000) ctrl_alu_op = `ALU_SRL;
-                        else if (funct7 == 7'b0100000) ctrl_alu_op = `ALU_SRA;
-                        else ctrl_illegal = 1'b1;
-                    end
-                    default: ctrl_illegal = 1'b1;
-                endcase
-                if (funct3 == 3'b001 && funct7 != 7'b0000000) ctrl_illegal = 1'b1;
-            end
-
-            7'b0110011: begin // OP
-                dec_has_rd  = 1'b1;
-                dec_has_rs1 = 1'b1;
-                dec_has_rs2 = 1'b1;
-                ctrl_reg_write = 1'b1;
-                ctrl_alu_src_b = `ALU_B_RS2;
-                case (funct3)
-                    3'b000: begin
-                        if (funct7 == 7'b0000000) ctrl_alu_op = `ALU_ADD;
-                        else if (funct7 == 7'b0100000) ctrl_alu_op = `ALU_SUB;
-                        else ctrl_illegal = 1'b1;
-                    end
-                    3'b001: ctrl_illegal = (funct7 != 7'b0000000);
-                    3'b010: ctrl_illegal = (funct7 != 7'b0000000);
-                    3'b011: ctrl_illegal = (funct7 != 7'b0000000);
-                    3'b100: ctrl_illegal = (funct7 != 7'b0000000);
-                    3'b101: begin
-                        if (funct7 == 7'b0000000) ctrl_alu_op = `ALU_SRL;
-                        else if (funct7 == 7'b0100000) ctrl_alu_op = `ALU_SRA;
-                        else ctrl_illegal = 1'b1;
-                    end
-                    3'b110: ctrl_illegal = (funct7 != 7'b0000000);
-                    3'b111: ctrl_illegal = (funct7 != 7'b0000000);
-                    default: ctrl_illegal = 1'b1;
-                endcase
-                if (!ctrl_illegal) begin
-                    case (funct3)
-                        3'b001: ctrl_alu_op = `ALU_SLL;
-                        3'b010: ctrl_alu_op = `ALU_SLT;
-                        3'b011: ctrl_alu_op = `ALU_SLTU;
-                        3'b100: ctrl_alu_op = `ALU_XOR;
-                        3'b110: ctrl_alu_op = `ALU_OR;
-                        3'b111: ctrl_alu_op = `ALU_AND;
-                        default: ;
-                    endcase
-                end
-            end
-
-            7'b0110111: begin // LUI
-                dec_has_rd = 1'b1;
-                ctrl_reg_write = 1'b1;
-                ctrl_alu_src_a = `ALU_A_ZERO;
-                ctrl_imm_sel = `IMM_U;
-            end
-
-            7'b0010111: begin // AUIPC
-                dec_has_rd = 1'b1;
-                ctrl_reg_write = 1'b1;
-                ctrl_alu_src_a = `ALU_A_PC;
-                ctrl_imm_sel = `IMM_U;
-            end
-
-            7'b1101111: begin // JAL
-                dec_has_rd = 1'b1;
-                ctrl_reg_write = 1'b1;
-                ctrl_alu_src_a = `ALU_A_PC;
-                ctrl_imm_sel = `IMM_J;
-                ctrl_jump = 1'b1;
-            end
-
-            7'b1100111: begin // JALR
-                if (funct3 == 3'b000) begin
-                    dec_has_rd = 1'b1;
-                    dec_has_rs1 = 1'b1;
-                    ctrl_reg_write = 1'b1;
-                    ctrl_alu_src_a = `ALU_A_RS1;
-                    ctrl_imm_sel = `IMM_I;
-                    ctrl_jump = 1'b1;
-                    ctrl_jump_reg = 1'b1;
-                end else begin
-                    ctrl_illegal = 1'b1;
-                end
-            end
-
-            7'b1100011: begin // BRANCH
-                dec_has_rs1 = 1'b1;
-                dec_has_rs2 = 1'b1;
-                ctrl_alu_src_b = `ALU_B_RS2;
-                ctrl_imm_sel = `IMM_B;
-                case (funct3)
-                    3'b000: ctrl_branch_type = `BR_BEQ;
-                    3'b001: ctrl_branch_type = `BR_BNE;
-                    3'b100: ctrl_branch_type = `BR_BLT;
-                    3'b101: ctrl_branch_type = `BR_BGE;
-                    3'b110: ctrl_branch_type = `BR_BLTU;
-                    3'b111: ctrl_branch_type = `BR_BGEU;
-                    default: ctrl_illegal = 1'b1;
-                endcase
-            end
-
-            7'b0000011: begin // LOAD
-                dec_has_rd = 1'b1;
-                dec_has_rs1 = 1'b1;
-                ctrl_reg_write = 1'b1;
-                ctrl_mem_read = 1'b1;
-                ctrl_mem_size = funct3[1:0];
-                ctrl_mem_sext = ~funct3[2];
-                if (funct3[1:0] == 2'b11 || funct3 == 3'b010 && funct3[2]) ctrl_illegal = 1'b1;
-                if (funct3 == 3'b110 || funct3 == 3'b111) ctrl_illegal = 1'b1;
-            end
-
-            7'b0100011: begin // STORE
-                dec_has_rs1 = 1'b1;
-                dec_has_rs2 = 1'b1;
-                ctrl_mem_write = 1'b1;
-                ctrl_mem_size = funct3[1:0];
-                ctrl_imm_sel = `IMM_S;
-                if (funct3[2] == 1'b1 || funct3[1:0] == 2'b11) ctrl_illegal = 1'b1;
-            end
-
-            7'b0001111: begin // MISC-MEM
-                if (funct3 == 3'b000) begin
-                    // fence: nop
-                end else if (funct3 == 3'b001 && inst[31:15] == 17'h00000) begin
-                    ctrl_fence_i = 1'b1;
-                end else begin
-                    ctrl_illegal = 1'b1;
-                end
-            end
-
-            7'b1110011: begin // SYSTEM
-                if (funct3 == 3'b000) begin
-                    case (funct12)
-                        12'h000: ctrl_ecall = 1'b1;
-                        12'h001: ctrl_ebreak = 1'b1;
-                        12'h302: ctrl_mret = 1'b1;
-                        12'h105: ctrl_wfi = 1'b1;
-                        default: ctrl_illegal = 1'b1;
-                    endcase
-                end else begin
-                    dec_has_rd = 1'b1;
-                    ctrl_reg_write = 1'b1;
-                    ctrl_csr_src = funct3[2];
-                    case (funct3)
-                        3'b001: begin ctrl_csr_op = `CSR_OP_RW;  dec_has_rs1 = 1'b1; end
-                        3'b010: begin ctrl_csr_op = `CSR_OP_RS;  dec_has_rs1 = 1'b1; end
-                        3'b011: begin ctrl_csr_op = `CSR_OP_RC;  dec_has_rs1 = 1'b1; end
-                        3'b101: begin ctrl_csr_op = `CSR_OP_RWI; ctrl_imm_sel = `IMM_Z; end
-                        3'b110: begin ctrl_csr_op = `CSR_OP_RSI; ctrl_imm_sel = `IMM_Z; end
-                        3'b111: begin ctrl_csr_op = `CSR_OP_RCI; ctrl_imm_sel = `IMM_Z; end
-                        default: ctrl_illegal = 1'b1;
-                    endcase
-                end
-            end
-
-            default: ctrl_illegal = 1'b1;
-        endcase
-    end
+    npc_decoder decoder (
+        .inst             (inst),
+        .rd5              (rd5),
+        .rs15             (rs15),
+        .rs25             (rs25),
+        .rd               (inst_rd),
+        .rs1              (inst_rs1),
+        .rs2              (inst_rs2),
+        .csr_addr         (inst_csr),
+        .ctrl_illegal     (ctrl_illegal),
+        .ctrl_ecall       (ctrl_ecall),
+        .ctrl_ebreak      (ctrl_ebreak),
+        .ctrl_mret        (ctrl_mret),
+        .ctrl_wfi         (ctrl_wfi),
+        .ctrl_fence_i     (ctrl_fence_i),
+        .ctrl_alu_op      (ctrl_alu_op),
+        .ctrl_alu_src_a   (ctrl_alu_src_a),
+        .ctrl_alu_src_b   (ctrl_alu_src_b),
+        .ctrl_imm_sel     (ctrl_imm_sel),
+        .ctrl_reg_write   (ctrl_reg_write),
+        .ctrl_mem_read    (ctrl_mem_read),
+        .ctrl_mem_write   (ctrl_mem_write),
+        .ctrl_mem_size    (ctrl_mem_size),
+        .ctrl_mem_sext    (ctrl_mem_sext),
+        .ctrl_branch_type (ctrl_branch_type),
+        .ctrl_jump        (ctrl_jump),
+        .ctrl_jump_reg    (ctrl_jump_reg),
+        .ctrl_csr_op      (ctrl_csr_op),
+        .ctrl_csr_src     (ctrl_csr_src),
+        .dec_has_rd       (dec_has_rd),
+        .dec_has_rs1      (dec_has_rs1),
+        .dec_has_rs2      (dec_has_rs2)
+    );
 
     //==========================================================================
     // Register file
@@ -363,96 +191,64 @@ module npc_single_cycle (
     //==========================================================================
     // Immediate generator
     //==========================================================================
-    reg [31:0] imm;
-    always @(*) begin
-        case (ctrl_imm_sel)
-            `IMM_I: imm = {{20{inst[31]}}, inst[31:20]};
-            `IMM_S: imm = {{20{inst[31]}}, inst[31:25], inst[11:7]};
-            `IMM_B: imm = {{19{inst[31]}}, inst[31], inst[7], inst[30:25], inst[11:8], 1'b0};
-            `IMM_U: imm = {inst[31:12], 12'b0};
-            `IMM_J: imm = {{11{inst[31]}}, inst[31], inst[19:12], inst[20], inst[30:21], 1'b0};
-            `IMM_Z: imm = {27'b0, inst[19:15]};
-            default: imm = 32'h0;
-        endcase
-    end
+    wire [31:0] imm;
+
+    npc_imm imm_gen (
+        .inst    (inst),
+        .imm_sel (ctrl_imm_sel),
+        .imm     (imm)
+    );
 
     //==========================================================================
     // ALU
     //==========================================================================
-    reg [31:0] alu_op1;
-    reg [31:0] alu_op2;
-    reg [31:0] alu_result;
+    wire [31:0] alu_result;
 
-    always @(*) begin
-        case (ctrl_alu_src_a)
-            `ALU_A_RS1:  alu_op1 = rs1_data;
-            `ALU_A_PC:   alu_op1 = pc;
-            `ALU_A_ZERO: alu_op1 = 32'h0;
-            default:     alu_op1 = 32'h0;
-        endcase
-
-        case (ctrl_alu_src_b)
-            `ALU_B_RS2: alu_op2 = rs2_data;
-            `ALU_B_IMM: alu_op2 = imm;
-            default:    alu_op2 = imm;
-        endcase
-
-        case (ctrl_alu_op)
-            `ALU_ADD:  alu_result = alu_op1 + alu_op2;
-            `ALU_SUB:  alu_result = alu_op1 - alu_op2;
-            `ALU_SLT:  alu_result = ($signed(alu_op1) < $signed(alu_op2)) ? 32'h1 : 32'h0;
-            `ALU_SLTU: alu_result = (alu_op1 < alu_op2) ? 32'h1 : 32'h0;
-            `ALU_XOR:  alu_result = alu_op1 ^ alu_op2;
-            `ALU_OR:   alu_result = alu_op1 | alu_op2;
-            `ALU_AND:  alu_result = alu_op1 & alu_op2;
-            `ALU_SLL:  alu_result = alu_op1 << alu_op2[4:0];
-            `ALU_SRL:  alu_result = alu_op1 >> alu_op2[4:0];
-            `ALU_SRA:  alu_result = $signed(alu_op1) >>> alu_op2[4:0];
-            default:   alu_result = 32'h0;
-        endcase
-    end
+    npc_alu alu (
+        .rs1_data  (rs1_data),
+        .rs2_data  (rs2_data),
+        .pc        (pc),
+        .imm       (imm),
+        .alu_op    (ctrl_alu_op),
+        .alu_src_a (ctrl_alu_src_a),
+        .alu_src_b (ctrl_alu_src_b),
+        .alu_result(alu_result)
+    );
 
     //==========================================================================
     // Branch / jump target and condition
     //==========================================================================
-    reg        branch_taken;
-    reg [31:0] branch_target;
-    reg [31:0] jump_target;
-    reg        jump_target_misaligned;
+    wire        branch_taken;
+    wire [31:0] branch_target;
+    wire [31:0] jump_target;
+    wire        branch_target_misaligned;
+    wire        jump_target_misaligned;
 
-    always @(*) begin
-        branch_target = pc + imm;
-        jump_target = ctrl_jump_reg ? ((rs1_data + imm) & 32'hFFFF_FFFE) : (pc + imm);
-        jump_target_misaligned = (jump_target[1:0] != 2'b00);
-
-        case (ctrl_branch_type)
-            `BR_BEQ:  branch_taken = (rs1_data == rs2_data);
-            `BR_BNE:  branch_taken = (rs1_data != rs2_data);
-            `BR_BLT:  branch_taken = ($signed(rs1_data) < $signed(rs2_data));
-            `BR_BGE:  branch_taken = ($signed(rs1_data) >= $signed(rs2_data));
-            `BR_BLTU: branch_taken = (rs1_data < rs2_data);
-            `BR_BGEU: branch_taken = (rs1_data >= rs2_data);
-            default:  branch_taken = 1'b0;
-        endcase
-    end
-
-    wire [31:0] branch_final_target = branch_taken ? branch_target : pc + 32'd4;
-    wire        branch_target_misaligned = branch_taken && (branch_target[1:0] != 2'b00);
+    npc_branch branch_unit (
+        .pc                       (pc),
+        .imm                      (imm),
+        .rs1_data                 (rs1_data),
+        .rs2_data                 (rs2_data),
+        .branch_type              (ctrl_branch_type),
+        .jump_reg                 (ctrl_jump_reg),
+        .branch_taken             (branch_taken),
+        .branch_target            (branch_target),
+        .jump_target              (jump_target),
+        .branch_target_misaligned (branch_target_misaligned),
+        .jump_target_misaligned   (jump_target_misaligned)
+    );
 
     //==========================================================================
     // Memory access
     //==========================================================================
-    reg [31:0] mem_addr;
-    reg [31:0] store_data;
-    reg [31:0] load_aligned_data;
-    reg [31:0] load_final_data;
-    reg        load_misaligned;
-    reg        store_misaligned;
-    reg        clint_req_valid;
-    reg        clint_req_wen;
-
-    wire        clint_is_access = (mem_addr >= `CLINT_BASE) &&
-                                  (mem_addr < `CLINT_BASE + `CLINT_SIZE);
+    wire [31:0] mem_addr;
+    wire [31:0] store_data;
+    wire [31:0] load_final_data;
+    wire        load_misaligned;
+    wire        store_misaligned;
+    wire        clint_req_valid;
+    wire        clint_req_wen;
+    wire        clint_is_access;
     wire [31:0] clint_rdata;
     wire        clint_fault = 1'b0;
 
@@ -467,58 +263,34 @@ module npc_single_cycle (
         .resp_fault (clint_fault)
     );
 
-    always @(*) begin
-        mem_addr = alu_result;
-        store_data = rs2_data;
+    npc_load_store_unit load_store_unit (
+        .alu_result        (alu_result),
+        .rs2_data          (rs2_data),
+        .resp_load_data    (resp_load_data),
+        .clint_rdata       (clint_rdata),
+        .ctrl_mem_read     (ctrl_mem_read),
+        .ctrl_mem_write    (ctrl_mem_write),
+        .ctrl_mem_size     (ctrl_mem_size),
+        .ctrl_mem_sext     (ctrl_mem_sext),
+        .mem_addr          (mem_addr),
+        .store_data        (store_data),
+        .load_final_data   (load_final_data),
+        .load_misaligned   (load_misaligned),
+        .store_misaligned  (store_misaligned),
+        .clint_is_access   (clint_is_access),
+        .req_load_valid    (req_load_valid),
+        .req_load_addr     (req_load_addr),
+        .req_load_size     (req_load_size),
+        .req_store_valid   (req_store_valid),
+        .req_store_addr    (req_store_addr),
+        .req_store_size    (req_store_size),
+        .req_store_data    (req_store_data),
+        .clint_req_valid   (clint_req_valid),
+        .clint_req_wen     (clint_req_wen)
+    );
 
-        // Alignment checks
-        case (ctrl_mem_size)
-            `MEM_SIZE_BYTE: begin load_misaligned = 1'b0; store_misaligned = 1'b0; end
-            `MEM_SIZE_HALF: begin
-                load_misaligned = ctrl_mem_read && (mem_addr[0] != 1'b0);
-                store_misaligned = ctrl_mem_write && (mem_addr[0] != 1'b0);
-            end
-            `MEM_SIZE_WORD: begin
-                load_misaligned = ctrl_mem_read && (mem_addr[1:0] != 2'b00);
-                store_misaligned = ctrl_mem_write && (mem_addr[1:0] != 2'b00);
-            end
-            default: begin load_misaligned = 1'b0; store_misaligned = 1'b0; end
-        endcase
-
-        // Load alignment / sign extension
-        case (ctrl_mem_size)
-            `MEM_SIZE_BYTE: begin
-                load_aligned_data = {{24{resp_load_data[7]}}, resp_load_data[7:0]};
-                if (!ctrl_mem_sext) load_aligned_data = load_aligned_data & 32'h000000FF;
-            end
-            `MEM_SIZE_HALF: begin
-                load_aligned_data = {{16{resp_load_data[15]}}, resp_load_data[15:0]};
-                if (!ctrl_mem_sext) load_aligned_data = load_aligned_data & 32'h0000FFFF;
-            end
-            `MEM_SIZE_WORD: begin
-                load_aligned_data = resp_load_data;
-            end
-            default: load_aligned_data = resp_load_data;
-        endcase
-
-        // Choose CLINT or memory for load data
-        load_final_data = clint_is_access ? clint_rdata : load_aligned_data;
-
-        // Memory request signals
-        req_fetch_valid = 1'b1;
-        req_fetch_addr  = pc;
-        req_load_valid  = ctrl_mem_read && !clint_is_access;
-        req_load_addr   = mem_addr;
-        req_load_size   = ctrl_mem_size;
-        req_store_valid = ctrl_mem_write && !clint_is_access;
-        req_store_addr  = mem_addr;
-        req_store_size  = ctrl_mem_size;
-        req_store_data  = store_data;
-
-        // CLINT request
-        clint_req_valid = (ctrl_mem_read || ctrl_mem_write) && clint_is_access;
-        clint_req_wen   = ctrl_mem_write;
-    end
+    assign req_fetch_valid = 1'b1;
+    assign req_fetch_addr = pc;
 
     //==========================================================================
     // CSR operation

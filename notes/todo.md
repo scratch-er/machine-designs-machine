@@ -43,9 +43,10 @@
 
 ## Next steps
 
-- If UART must be modeled in RTL simulation, implement it in the DPI-C external bus/crossbar model, not in the core; generally ignore RTL UART writes during difftest and trust the emulator output if architectural execution matches.  
-- Refactor single-cycle core into the five-stage pipeline with I-cache, forwarding, and hazard logic.  
-- Re-run difftest and collect I-cache AMAT counters.  
+- Add a cycle-accurate AXI memory model in `RtlISS`, then switch the non-pipelined RTL core from direct DPI memory ports to the real AXI master path.
+- Add the required flip-flop I-cache and burst fills before refactoring into the five-stage pipeline.
+- Later refactor into the five-stage pipeline with forwarding, hazards, flushes, precise exceptions, and I-cache AMAT counters.
+- If UART must be modeled in RTL simulation, implement it in the external AXI simulation memory/MMIO model, not in the core; generally ignore RTL UART writes during difftest and trust the emulator output if architectural execution matches.
 
 ## Deferred
 
@@ -93,3 +94,10 @@
   - Also fixed an alignment bug in `components/libc/compilers/common/ctime.c`: `asctime_r` used `*(int*)` reads on the `days`/`months` string literals, which were not guaranteed 4-byte aligned in this BSP's rodata layout. Changed the declarations to use separately aligned arrays.
 - Fixed emulator Release builds with and without `BUILD_RTL`: warning flags are now target-scoped so `-Werror` still applies to project targets but no longer breaks Verilator-generated/system sources.
 - Refactored difftest to implement `ISS`; `emulator-rtl --difftest` now accepts the same shell command sequences as interpreter/RTL modes. RT-Thread AM passes unified difftest through `halt` after 567,442 matched instructions.
+- Recorded the staged core development order in `notes/core-design.md`: refactor first, then AXI simulation memory, AXI core path, I-cache/burst fills, and finally the 5-stage pipeline.
+- Completed the first refactor slice of the single-cycle RTL without changing the DPI-memory behavior:
+  - Added `core/rtl/npc_decoder.v`, `npc_imm.v`, `npc_alu.v`, `npc_branch.v`, and `npc_load_store_unit.v`.
+  - `npc_single_cycle.v` now keeps architectural state, CSR/regfile/CLINT ownership, exception priority, writeback, and commit capture while delegating reusable combinational logic.
+  - Added the new RTL files to `emulator/CMakeLists.txt`.
+  - Verified with `cmake -S emulator -B emulator/build-rtl -DBUILD_RTL=ON -DCMAKE_BUILD_TYPE=Release`, `cmake --build emulator/build-rtl -j`, and `ctest --test-dir emulator/build-rtl --output-on-failure`.
+  - Re-ran RTL difftest on the non-UART ISA workloads plus AM CoreMark and RT-Thread AM; all completed successfully.
