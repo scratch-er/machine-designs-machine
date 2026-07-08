@@ -1,6 +1,6 @@
 // NPC Core top module.
 //
-// Phase 1: single-cycle baseline datapath using the external AXI4 master port.
+// Pipelined datapath using the external AXI4 master port.
 
 `include "npc_defines.vh"
 
@@ -136,6 +136,7 @@ module npc_core (
     wire        req_load_valid;
     wire [31:0] req_load_addr;
     wire [1:0]  req_load_size;
+    wire        req_load_ready;
     wire [31:0] resp_load_data;
     wire        resp_load_fault;
     wire        resp_load_misaligned;
@@ -144,6 +145,7 @@ module npc_core (
     wire [31:0] req_store_addr;
     wire [1:0]  req_store_size;
     wire [31:0] req_store_data;
+    wire        req_store_ready;
     wire        resp_store_fault;
     wire        resp_store_misaligned;
 
@@ -157,7 +159,7 @@ module npc_core (
     wire [31:0] debug_csr_data_unused;
 `endif
 
-    npc_single_cycle core (
+    npc_pipeline core (
         .clock                  (clock),
         .reset                  (reset),
         .req_fetch_valid        (req_fetch_valid),
@@ -169,6 +171,7 @@ module npc_core (
         .req_load_valid         (req_load_valid),
         .req_load_addr          (req_load_addr),
         .req_load_size          (req_load_size),
+        .req_load_ready         (req_load_ready),
         .resp_load_data         (resp_load_data),
         .resp_load_fault        (resp_load_fault),
         .resp_load_misaligned   (resp_load_misaligned),
@@ -176,6 +179,7 @@ module npc_core (
         .req_store_addr         (req_store_addr),
         .req_store_size         (req_store_size),
         .req_store_data         (req_store_data),
+        .req_store_ready        (req_store_ready),
         .resp_store_fault       (resp_store_fault),
         .resp_store_misaligned  (resp_store_misaligned),
         .commit_valid           (commit_valid),
@@ -240,6 +244,7 @@ module npc_core (
         .req_load_valid         (req_load_valid),
         .req_load_addr          (req_load_addr),
         .req_load_size          (req_load_size),
+        .req_load_ready         (req_load_ready),
         .resp_load_data         (resp_load_data),
         .resp_load_fault        (resp_load_fault),
         .resp_load_misaligned   (resp_load_misaligned),
@@ -247,6 +252,7 @@ module npc_core (
         .req_store_addr         (req_store_addr),
         .req_store_size         (req_store_size),
         .req_store_data         (req_store_data),
+        .req_store_ready        (req_store_ready),
         .resp_store_fault       (resp_store_fault),
         .resp_store_misaligned  (resp_store_misaligned),
         .io_master_awready      (io_master_awready),

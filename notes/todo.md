@@ -49,11 +49,10 @@
   - `core/rtl/npc_icache.v`: 2 direct-mapped flip-flop lines, 16-byte line size, AXI 4-beat fills, `fence.i` invalidation, AMAT counters.
   - Fetch now waits for `resp_fetch_valid`; data load/store remain baseline zero-latency for this single-cycle core.
   - Verified RTL Release build, CTest, and non-UART ISA difftest workloads.
-- Before changing pipeline structure, optionally run longer AM CoreMark with the cache enabled; RT-Thread AM scripted shell difftest already passes.
-- Refactor into the five-stage pipeline only after I-cache is stable:
-  - IF/ID/EX/MEM/WB split.
-  - Forwarding, load-use stalls, branch/jump flushes, precise exceptions.
-  - Rerun difftest after each sub-step.
+- Pipeline milestone is implemented and wired as the normal `npc_core` datapath:
+  - `core/rtl/npc_pipeline.v`: IF/ID/EX/MEM/WB in-order datapath, static not-taken fetch, forwarding, conservative load/store/CSR stalls, branch/jump/mret flushes, and precise exception redirects.
+  - `npc_axi_master.v` now exposes same-cycle data ready signals so the pipeline can backpressure MEM while I-cache fills own the read channel.
+  - Verified RTL Release build, CTest, non-UART ISA difftest workloads, AM hello, and RT-Thread AM scripted shell difftest.
 - Before relying on CLINT/UART/input-heavy workloads for pipeline validation, refactor difftest to replay DUT-observed peripheral inputs into REF; see `notes/difftest-design.md`.
 - Keep UART outside the processor core; if needed in RTL simulation, implement it in the external AXI simulation memory/MMIO model.
 
@@ -129,6 +128,12 @@
 - Implemented the I-cache milestone:
   - Added waitable fetch response in `npc_single_cycle.v` and a `fence_i_commit` pulse for cache invalidation.
   - Added `npc_icache.v` with two 16-byte direct-mapped lines, 4-beat AXI fill, fill-fault handling, flush, and counters.
-  - Wired `npc_core.v` through I-cache to `npc_axi_master.v`; fetch fills are stateful bursts, while data accesses remain single-cycle for the current baseline.
+  - Wired `npc_core.v` through I-cache to `npc_axi_master.v`; fetch fills are stateful bursts, while data accesses remain single-cycle for this baseline.
   - Updated Verilator AXI memory responders for read bursts and kept simple zero-latency data access behavior.
   - Verified with RTL Release build, CTest, non-UART ISA difftest workloads, and RT-Thread AM scripted shell difftest (`567442` matched instructions).
+
+- Implemented the pipelined RTL datapath:
+  - Added `core/rtl/npc_pipeline.v` and switched `npc_core.v` from `npc_single_cycle` to `npc_pipeline`; kept `npc_single_cycle.v` as a reference file.
+  - Pipeline has IF/ID, ID/EX, EX/MEM, MEM/WB registers, static not-taken control flow, ALU/MEM-WB forwarding, conservative load/store/CSR stalls, `ebreak` fetch suppression, and precise redirects for EX/MEM exceptions.
+  - Extended `npc_axi_master.v` with `req_load_ready`/`req_store_ready` so MEM can stall when an I-cache fill owns the AXI read channel.
+  - Verified with `cmake --build emulator/build-rtl -j`, `ctest --test-dir emulator/build-rtl --output-on-failure`, all non-UART ISA difftest workloads (`alu`, `branch`, `branch_misaligned`, `compare`, `csr`, `csr_all`, `ecall`, `exception`, `exception_priority`, `illegal_inst`, `jal_jalr`, `load_store`, `lui_auipc`, `mem_fault`, `misc_priv`, `mret`, `shift`, `alu_comb`, `branch_comb`), AM hello difftest, and RT-Thread AM scripted shell difftest (`567442` matched instructions).

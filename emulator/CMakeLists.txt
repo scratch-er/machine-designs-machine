@@ -49,6 +49,7 @@ if(BUILD_RTL)
 
     set(NPC_RTL_SOURCES
         ${NPC_RTL_DIR}/npc_core.v
+        ${NPC_RTL_DIR}/npc_pipeline.v
         ${NPC_RTL_DIR}/npc_single_cycle.v
         ${NPC_RTL_DIR}/npc_icache.v
         ${NPC_RTL_DIR}/npc_axi_master.v

@@ -20,6 +20,7 @@ module npc_axi_master (
     input             req_load_valid,
     input      [31:0] req_load_addr,
     input      [1:0]  req_load_size,
+    output            req_load_ready,
     output     [31:0] resp_load_data,
     output            resp_load_fault,
     output            resp_load_misaligned,
@@ -28,6 +29,7 @@ module npc_axi_master (
     input      [31:0] req_store_addr,
     input      [1:0]  req_store_size,
     input      [31:0] req_store_data,
+    output            req_store_ready,
     output            resp_store_fault,
     output            resp_store_misaligned,
 
@@ -81,7 +83,7 @@ module npc_axi_master (
     reg        data_write_fault_reg;
 
     wire data_load_active = (state == STATE_IDLE) && req_load_valid;
-    wire data_store_active = (state == STATE_IDLE) && !req_load_valid && req_store_valid;
+    wire data_store_active = !req_load_valid && req_store_valid;
     wire start_fetch = (state == STATE_IDLE) && !req_load_valid && !req_store_valid && req_fetch_valid;
 
     assign req_fetch_ready = (state == STATE_IF_AR) && io_master_arready;
@@ -139,13 +141,14 @@ module npc_axi_master (
     assign resp_fetch_last  = io_master_rlast;
     assign resp_fetch_fault = r_fetch_beat && r_fault;
 
+    assign req_load_ready = r_data_beat;
     assign resp_load_data = data_load_active ? io_master_rdata : 32'h0;
-    assign resp_load_fault = data_load_active && (!r_data_beat || r_fault);
+    assign resp_load_fault = data_load_active && r_data_beat && r_fault;
     assign resp_load_misaligned = 1'b0;
 
-    assign resp_store_fault = data_store_active &&
-                              (!(io_master_awready && io_master_wready && io_master_bvalid && io_master_bid == AXI_ID_DATA) ||
-                               b_fault);
+    assign req_store_ready = data_store_active && io_master_awready && io_master_wready &&
+                             io_master_bvalid && io_master_bid == AXI_ID_DATA;
+    assign resp_store_fault = req_store_ready && b_fault;
     assign resp_store_misaligned = 1'b0;
 
     always @(posedge clock or posedge reset) begin
