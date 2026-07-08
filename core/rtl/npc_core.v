@@ -88,7 +88,11 @@ module npc_core (
     input      [3:0]   debug_reg_addr,
     output     [31:0]  debug_reg_data,
     input      [11:0]  debug_csr_addr,
-    output     [31:0]  debug_csr_data
+    output     [31:0]  debug_csr_data,
+    output     [31:0]  debug_icache_access,
+    output     [31:0]  debug_icache_hit,
+    output     [31:0]  debug_icache_miss,
+    output     [31:0]  debug_icache_miss_cycles
 `endif
 );
 
@@ -108,12 +112,26 @@ module npc_core (
     // Unused reserved input.
     wire _unused_io_interrupt = io_interrupt;
 
-    // Wires between the datapath and the DPI-C memory.
+    // Wires between datapath, I-cache, and AXI master.
     wire        req_fetch_valid;
     wire [31:0] req_fetch_addr;
+    wire        resp_fetch_valid;
     wire [31:0] resp_fetch_inst;
     wire        resp_fetch_fault;
     wire        resp_fetch_misaligned;
+    wire        fence_i_commit;
+
+    wire        icache_fill_req_valid;
+    wire [31:0] icache_fill_req_addr;
+    wire        icache_fill_req_ready;
+    wire        icache_fill_resp_valid;
+    wire [31:0] icache_fill_resp_data;
+    wire        icache_fill_resp_last;
+    wire        icache_fill_resp_fault;
+    wire [31:0] icache_counter_access;
+    wire [31:0] icache_counter_hit;
+    wire [31:0] icache_counter_miss;
+    wire [31:0] icache_counter_miss_cycles;
 
     wire        req_load_valid;
     wire [31:0] req_load_addr;
@@ -144,6 +162,7 @@ module npc_core (
         .reset                  (reset),
         .req_fetch_valid        (req_fetch_valid),
         .req_fetch_addr         (req_fetch_addr),
+        .resp_fetch_valid       (resp_fetch_valid),
         .resp_fetch_inst        (resp_fetch_inst),
         .resp_fetch_fault       (resp_fetch_fault),
         .resp_fetch_misaligned  (resp_fetch_misaligned),
@@ -167,6 +186,7 @@ module npc_core (
         .commit_exception       (commit_exception),
         .commit_cause           (commit_cause),
         .commit_next_pc         (commit_next_pc),
+        .fence_i_commit         (fence_i_commit),
 `ifdef VERILATOR
         .debug_pc               (debug_pc),
         .debug_inst             (debug_inst),
@@ -184,12 +204,39 @@ module npc_core (
 `endif
     );
 
+    npc_icache icache (
+        .clock                  (clock),
+        .reset                  (reset),
+        .flush                  (fence_i_commit),
+        .lookup_valid           (req_fetch_valid),
+        .lookup_addr            (req_fetch_addr),
+        .resp_valid             (resp_fetch_valid),
+        .resp_inst              (resp_fetch_inst),
+        .resp_fault             (resp_fetch_fault),
+        .resp_misaligned        (resp_fetch_misaligned),
+        .fill_req_valid         (icache_fill_req_valid),
+        .fill_req_addr          (icache_fill_req_addr),
+        .fill_req_ready         (icache_fill_req_ready),
+        .fill_resp_valid        (icache_fill_resp_valid),
+        .fill_resp_data         (icache_fill_resp_data),
+        .fill_resp_last         (icache_fill_resp_last),
+        .fill_resp_fault        (icache_fill_resp_fault),
+        .counter_access         (icache_counter_access),
+        .counter_hit            (icache_counter_hit),
+        .counter_miss           (icache_counter_miss),
+        .counter_miss_cycles    (icache_counter_miss_cycles)
+    );
+
     npc_axi_master axi_master (
-        .req_fetch_valid        (req_fetch_valid),
-        .req_fetch_addr         (req_fetch_addr),
-        .resp_fetch_inst        (resp_fetch_inst),
-        .resp_fetch_fault       (resp_fetch_fault),
-        .resp_fetch_misaligned  (resp_fetch_misaligned),
+        .clock                  (clock),
+        .reset                  (reset),
+        .req_fetch_valid        (icache_fill_req_valid),
+        .req_fetch_addr         (icache_fill_req_addr),
+        .req_fetch_ready        (icache_fill_req_ready),
+        .resp_fetch_valid       (icache_fill_resp_valid),
+        .resp_fetch_data        (icache_fill_resp_data),
+        .resp_fetch_last        (icache_fill_resp_last),
+        .resp_fetch_fault       (icache_fill_resp_fault),
         .req_load_valid         (req_load_valid),
         .req_load_addr          (req_load_addr),
         .req_load_size          (req_load_size),
@@ -232,5 +279,12 @@ module npc_core (
         .io_master_rlast        (io_master_rlast),
         .io_master_rid          (io_master_rid)
     );
+
+`ifdef VERILATOR
+    assign debug_icache_access = icache_counter_access;
+    assign debug_icache_hit = icache_counter_hit;
+    assign debug_icache_miss = icache_counter_miss;
+    assign debug_icache_miss_cycles = icache_counter_miss_cycles;
+`endif
 
 endmodule

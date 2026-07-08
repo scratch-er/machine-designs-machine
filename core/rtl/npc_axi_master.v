@@ -1,20 +1,21 @@
-// Single-cycle AXI4 master bridge for the baseline core.
+// AXI4 master bridge for the NPC core.
 //
-// The current datapath still retires one instruction per cycle, so this bridge
-// uses the zero-latency AXI timing planned for the baseline: the testbench keeps
-// address/data ready high and returns R/B responses combinationally in the same
-// cycle as the request. The signal set is real AXI4 and is reusable by the later
-// pipelined implementation, which will replace this bridge with a stateful
-// transaction sequencer.
+// The bridge accepts one transaction at a time. I-cache fills use a four-beat
+// read burst on ID 0. Data loads/stores use single-beat transactions on ID 1.
 
 `include "npc_defines.vh"
 
 module npc_axi_master (
+    input             clock,
+    input             reset,
+
     input             req_fetch_valid,
     input      [31:0] req_fetch_addr,
-    output     [31:0] resp_fetch_inst,
+    output            req_fetch_ready,
+    output            resp_fetch_valid,
+    output     [31:0] resp_fetch_data,
+    output            resp_fetch_last,
     output            resp_fetch_fault,
-    output            resp_fetch_misaligned,
 
     input             req_load_valid,
     input      [31:0] req_load_addr,
@@ -64,28 +65,43 @@ module npc_axi_master (
     localparam [3:0] AXI_ID_FETCH = 4'h0;
     localparam [3:0] AXI_ID_DATA  = 4'h1;
 
-    wire        data_read_active = req_load_valid;
-    wire        fetch_active = req_fetch_valid && !data_read_active;
-    wire [31:0] read_addr = data_read_active ? req_load_addr : req_fetch_addr;
-    wire [1:0]  read_size = data_read_active ? req_load_size : `MEM_SIZE_WORD;
-    wire [3:0]  read_id   = data_read_active ? AXI_ID_DATA : AXI_ID_FETCH;
+    localparam STATE_IDLE       = 3'd0;
+    localparam STATE_IF_AR      = 3'd1;
+    localparam STATE_IF_R       = 3'd2;
+    localparam STATE_DATA_AR    = 3'd3;
+    localparam STATE_DATA_R     = 3'd4;
+    localparam STATE_DATA_W     = 3'd5;
+    localparam STATE_DATA_B     = 3'd6;
 
-    assign io_master_arvalid = data_read_active || fetch_active;
-    assign io_master_araddr  = read_addr;
-    assign io_master_arid    = read_id;
-    assign io_master_arlen   = 8'h00;
-    assign io_master_arsize  = {1'b0, read_size};
+    reg [2:0] state;
+    reg [31:0] addr_reg;
+    reg [1:0]  size_reg;
+    reg [31:0] store_data_reg;
+    reg        data_read_fault_reg;
+    reg        data_write_fault_reg;
+
+    wire data_load_active = (state == STATE_IDLE) && req_load_valid;
+    wire data_store_active = (state == STATE_IDLE) && !req_load_valid && req_store_valid;
+    wire start_fetch = (state == STATE_IDLE) && !req_load_valid && !req_store_valid && req_fetch_valid;
+
+    assign req_fetch_ready = (state == STATE_IF_AR) && io_master_arready;
+
+    assign io_master_arvalid = (state == STATE_IF_AR) || data_load_active;
+    assign io_master_araddr  = data_load_active ? req_load_addr : addr_reg;
+    assign io_master_arid    = data_load_active ? AXI_ID_DATA : AXI_ID_FETCH;
+    assign io_master_arlen   = 8'h00 | ((state == STATE_IF_AR) ? 8'h03 : 8'h00);
+    assign io_master_arsize  = data_load_active ? {1'b0, req_load_size} : 3'b010;
     assign io_master_arburst = `AXBURST_INCR;
-    assign io_master_rready  = 1'b1;
+    assign io_master_rready  = (state == STATE_IF_R) || data_load_active;
 
-    assign io_master_awvalid = req_store_valid;
+    assign io_master_awvalid = data_store_active;
     assign io_master_awaddr  = req_store_addr;
     assign io_master_awid    = AXI_ID_DATA;
     assign io_master_awlen   = 8'h00;
     assign io_master_awsize  = {1'b0, req_store_size};
     assign io_master_awburst = `AXBURST_INCR;
 
-    assign io_master_wvalid = req_store_valid;
+    assign io_master_wvalid = data_store_active;
     assign io_master_wlast  = 1'b1;
     assign io_master_bready = 1'b1;
 
@@ -111,27 +127,85 @@ module npc_axi_master (
     assign io_master_wstrb = store_wstrb;
     assign io_master_wdata = store_wdata_shifted;
 
-    wire read_accepted = io_master_arvalid && io_master_arready &&
-                         io_master_rvalid && io_master_rlast &&
-                         (io_master_rid == read_id);
-    wire read_fault = !read_accepted ||
-                      (io_master_rresp == `AXRESP_SLVERR) ||
-                      (io_master_rresp == `AXRESP_DECERR);
+    wire r_fetch_beat = (state == STATE_IF_R) && io_master_rvalid && (io_master_rid == AXI_ID_FETCH);
+    wire r_data_beat = data_load_active && io_master_rvalid && (io_master_rid == AXI_ID_DATA);
+    wire b_data_beat = (state == STATE_DATA_B) && io_master_bvalid && (io_master_bid == AXI_ID_DATA);
 
-    assign resp_fetch_inst       = fetch_active ? io_master_rdata : 32'h0;
-    assign resp_fetch_fault      = fetch_active && read_fault;
-    assign resp_fetch_misaligned = req_fetch_valid && (req_fetch_addr[1:0] != 2'b00);
+    wire r_fault = (io_master_rresp == `AXRESP_SLVERR) || (io_master_rresp == `AXRESP_DECERR);
+    wire b_fault = (io_master_bresp == `AXRESP_SLVERR) || (io_master_bresp == `AXRESP_DECERR);
 
-    assign resp_load_data       = data_read_active ? io_master_rdata : 32'h0;
-    assign resp_load_fault      = data_read_active && read_fault;
+    assign resp_fetch_valid = r_fetch_beat;
+    assign resp_fetch_data  = io_master_rdata;
+    assign resp_fetch_last  = io_master_rlast;
+    assign resp_fetch_fault = r_fetch_beat && r_fault;
+
+    assign resp_load_data = data_load_active ? io_master_rdata : 32'h0;
+    assign resp_load_fault = data_load_active && (!r_data_beat || r_fault);
     assign resp_load_misaligned = 1'b0;
 
-    wire write_accepted = req_store_valid && io_master_awready && io_master_wready &&
-                          io_master_bvalid && (io_master_bid == AXI_ID_DATA);
-    assign resp_store_fault = req_store_valid &&
-                              (!write_accepted ||
-                               io_master_bresp == `AXRESP_SLVERR ||
-                               io_master_bresp == `AXRESP_DECERR);
+    assign resp_store_fault = data_store_active &&
+                              (!(io_master_awready && io_master_wready && io_master_bvalid && io_master_bid == AXI_ID_DATA) ||
+                               b_fault);
     assign resp_store_misaligned = 1'b0;
+
+    always @(posedge clock or posedge reset) begin
+        if (reset) begin
+            state <= STATE_IDLE;
+            addr_reg <= 32'h0;
+            size_reg <= `MEM_SIZE_WORD;
+            store_data_reg <= 32'h0;
+            data_read_fault_reg <= 1'b0;
+            data_write_fault_reg <= 1'b0;
+        end else begin
+            case (state)
+                STATE_IDLE: begin
+                    data_read_fault_reg <= 1'b0;
+                    data_write_fault_reg <= 1'b0;
+                    if (start_fetch) begin
+                        addr_reg <= req_fetch_addr;
+                        size_reg <= `MEM_SIZE_WORD;
+                        state <= STATE_IF_AR;
+                    end
+                end
+
+                STATE_IF_AR: begin
+                    if (io_master_arready) begin
+                        state <= STATE_IF_R;
+                    end
+                end
+
+                STATE_IF_R: begin
+                    if (r_fetch_beat && io_master_rlast) begin
+                        state <= STATE_IDLE;
+                    end
+                end
+
+                STATE_DATA_AR: begin
+                    state <= STATE_IDLE;
+                end
+
+                STATE_DATA_R: begin
+                    state <= STATE_IDLE;
+                end
+
+                STATE_DATA_W: begin
+                    if (io_master_awready && io_master_wready) begin
+                        state <= STATE_DATA_B;
+                    end
+                end
+
+                STATE_DATA_B: begin
+                    if (b_data_beat) begin
+                        data_write_fault_reg <= b_fault;
+                        state <= STATE_IDLE;
+                    end
+                end
+
+                default: begin
+                    state <= STATE_IDLE;
+                end
+            endcase
+        end
+    end
 
 endmodule

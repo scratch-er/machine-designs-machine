@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 **/.cache/
 **/build/
+**/build-rtl/
 compile_commands.json
 .agents/
 *.o

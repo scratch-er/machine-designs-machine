@@ -35,7 +35,7 @@ Design a RISC-V CPU core (RV32E_Zicsr, M-mode only) and verify it against a refe
 ### M4 — Processor core
 *Completion gate: RTL implements the spec and builds under Verilator.*
 
-- Choose microarchitecture after M2 (single-cycle baseline first, then pipeline).
+- Single-cycle AXI baseline first, then required flip-flop I-cache, then five-stage pipeline.
 - AXI4 master, built-in CLINT, flip-flop instruction cache.
 - Commit interface exposed for difftest.
 
@@ -46,7 +46,20 @@ Design a RISC-V CPU core (RV32E_Zicsr, M-mode only) and verify it against a refe
 - AXI testbench memory that reuses the emulator memory model.
 - Commit-event difftest between emulator (reference) and RTL (DUT).
 
-### M6 — Optimization and PPA
+### M6 — ysyxSoC integration
+*Completion gate: pipelined RTL boots or runs a smoke workload through real ysyxSoC AXI peripherals.*
+
+- Connect the core to the ysyxSoC bus and memory devices after I-cache and pipeline are stable.
+- Refactor the ISS/memory model from a single flat RAM assumption to explicit memory devices.
+- Model ysyxSoC memories with these properties:
+  - MROM: loadable by simulator, read-only to processor (`l-`).
+  - flash: loadable by simulator, read-only to processor (`l-`).
+  - PSRAM: not loadable by simulator, writable by processor (`-w`).
+  - All memories are readable by the processor.
+- Add DPI-C hooks for RTL/core reads from MROM and flash.
+- Build VCD/AXI waveform analysis tooling before deep real-peripheral debugging.
+
+### M7 — Optimization and PPA
 *Completion gate: core meets area/timing targets and performance is measured.*
 
 - Pipeline tuning, critical-path reduction.
@@ -67,4 +80,4 @@ Design a RISC-V CPU core (RV32E_Zicsr, M-mode only) and verify it against a refe
 
 ## Current Next Step
 
-Begin processor core design (M4): implement a single-cycle or pipelined RV32E_Zicsr core in Verilog, then verify it against the emulator using the difftest harness.
+Continue M4/M5 in the controlled RTL difftest environment: implement the required flip-flop I-cache on the existing AXI baseline, then refactor into the five-stage pipeline. Defer ysyxSoC peripheral integration until the pipelined core is stable, because connecting real peripherals now would force an ISS/memory-map refactor and likely require re-debugging AXI after cache/pipeline timing changes.

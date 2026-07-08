@@ -50,6 +50,7 @@ if(BUILD_RTL)
     set(NPC_RTL_SOURCES
         ${NPC_RTL_DIR}/npc_core.v
         ${NPC_RTL_DIR}/npc_single_cycle.v
+        ${NPC_RTL_DIR}/npc_icache.v
         ${NPC_RTL_DIR}/npc_axi_master.v
         ${NPC_RTL_DIR}/npc_decoder.v
         ${NPC_RTL_DIR}/npc_imm.v

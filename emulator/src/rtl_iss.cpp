@@ -42,6 +42,10 @@ public:
         cycle_ = 0;
         commit_timeout_cycles_ = cfg_.commit_timeout_cycles;
         write_seen_this_cycle_ = false;
+        write_active_ = false;
+        read_active_ = false;
+        read_wait_cycles_ = 0;
+        read_beats_left_ = 0;
 
         // Hold reset for a few cycles.
         top_->reset = 1;
@@ -177,6 +181,14 @@ private:
     int log_level_ = 0;
     mutable bool write_seen_this_cycle_ = false;
     mutable MemResult write_result_this_cycle_ = MemResult::OK;
+    mutable bool write_active_ = false;
+    mutable u32 write_id_ = 0;
+    mutable bool read_active_ = false;
+    mutable u32 read_wait_cycles_ = 0;
+    mutable u32 read_addr_ = 0;
+    mutable u32 read_size_ = 0;
+    mutable u32 read_beats_left_ = 0;
+    mutable u32 read_id_ = 0;
 
     static u32 axi_size_bytes(u32 axsize) {
         switch (axsize) {
@@ -203,44 +215,47 @@ private:
         top_->io_master_rresp = 0;
         top_->io_master_rdata = 0;
         top_->io_master_rlast = 0;
-        top_->io_master_rid = top_->io_master_arid;
+        top_->io_master_rid = read_id_;
 
-        if (top_->io_master_arvalid) {
-            u32 addr = top_->io_master_araddr;
+        if (top_->io_master_arvalid && top_->io_master_arid == 1 && top_->io_master_arlen == 0) {
+            u32 data = 0;
             u32 size = axi_size_bytes(top_->io_master_arsize);
+            MemResult result = size == 0 ? MemResult::ACCESS_FAULT : memory_.load(top_->io_master_araddr, size, data);
+            top_->io_master_rvalid = 1;
+            top_->io_master_rresp = result == MemResult::OK ? 0 : 2;
+            top_->io_master_rdata = data;
+            top_->io_master_rlast = 1;
+            top_->io_master_rid = top_->io_master_arid;
+        } else if (read_active_ && read_wait_cycles_ == 0) {
             u32 data = 0;
             MemResult result = MemResult::ACCESS_FAULT;
 
-            if (size != 0) {
-                if (top_->io_master_arid == 0 && size == 4) {
-                    result = memory_.fetch(addr, data);
+            if (read_size_ != 0) {
+                if (read_id_ == 0 && read_size_ == 4) {
+                    result = memory_.fetch(read_addr_, data);
                 } else {
-                    result = memory_.load(addr, size, data);
+                    result = memory_.load(read_addr_, read_size_, data);
                 }
             }
 
             top_->io_master_rvalid = 1;
             top_->io_master_rresp = result == MemResult::OK ? 0 : 2;
             top_->io_master_rdata = data;
-            top_->io_master_rlast = 1;
-            top_->io_master_rid = top_->io_master_arid;
+            top_->io_master_rlast = read_beats_left_ == 1;
+            top_->io_master_rid = read_id_;
         }
 
-        top_->io_master_bvalid = 0;
-        top_->io_master_bresp = 0;
-        top_->io_master_bid = top_->io_master_awid;
-
+        top_->io_master_bvalid = write_active_;
+        top_->io_master_bresp = write_result_this_cycle_ == MemResult::OK ? 0 : 2;
+        top_->io_master_bid = write_id_;
         if (top_->io_master_awvalid && top_->io_master_wvalid) {
-            if (!write_seen_this_cycle_) {
-                u32 addr = top_->io_master_awaddr;
-                u32 size = axi_size_bytes(top_->io_master_awsize);
-                if (size == 0) {
-                    write_result_this_cycle_ = MemResult::ACCESS_FAULT;
-                } else {
-                    u32 data = extract_narrow_write_data(addr, size, top_->io_master_wdata);
-                    write_result_this_cycle_ = memory_.store(addr, size, data);
-                }
-                write_seen_this_cycle_ = true;
+            u32 addr = top_->io_master_awaddr;
+            u32 size = axi_size_bytes(top_->io_master_awsize);
+            if (size == 0) {
+                write_result_this_cycle_ = MemResult::ACCESS_FAULT;
+            } else {
+                u32 data = extract_narrow_write_data(addr, size, top_->io_master_wdata);
+                write_result_this_cycle_ = memory_.store(addr, size, data);
             }
             top_->io_master_bvalid = 1;
             top_->io_master_bresp = write_result_this_cycle_ == MemResult::OK ? 0 : 2;
@@ -256,14 +271,39 @@ private:
 
     void toggle_clock() {
         write_seen_this_cycle_ = false;
+        if (read_wait_cycles_ != 0) --read_wait_cycles_;
 
         top_->clock = 0;
         eval_with_axi();
+        bool read_addr_handshake = top_->io_master_arvalid && top_->io_master_arready &&
+                                   top_->io_master_arid == 0;
+        bool read_data_handshake = top_->io_master_rvalid && top_->io_master_rready && read_active_;
+        u32 next_read_addr = top_->io_master_araddr;
+        u32 next_read_size = axi_size_bytes(top_->io_master_arsize);
+        u32 next_read_beats = static_cast<u32>(top_->io_master_arlen) + 1u;
+        u32 next_read_id = top_->io_master_arid;
         if (trace_) trace_->dump(contextp_->time());
         contextp_->timeInc(1);
 
         top_->clock = 1;
         eval_with_axi();
+        if (read_data_handshake) {
+            if (read_beats_left_ == 1) {
+                read_active_ = false;
+                read_beats_left_ = 0;
+            } else {
+                --read_beats_left_;
+                read_addr_ += read_size_;
+            }
+        }
+        if (read_addr_handshake) {
+            read_active_ = true;
+            read_wait_cycles_ = 2;
+            read_addr_ = next_read_addr;
+            read_size_ = next_read_size;
+            read_beats_left_ = next_read_beats;
+            read_id_ = next_read_id;
+        }
         if (trace_) trace_->dump(contextp_->time());
         contextp_->timeInc(1);
 

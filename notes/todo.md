@@ -43,21 +43,32 @@
 
 ## Next steps
 
-- Add the required flip-flop I-cache and burst fills before refactoring into the five-stage pipeline.
-- Later refactor into the five-stage pipeline with forwarding, hazards, flushes, precise exceptions, and I-cache AMAT counters.
+- Decision: implement I-cache and pipeline before connecting to real ysyxSoC AXI peripherals.
+  - Rationale: the current controlled RTL difftest flow is enough for I-cache/pipeline bring-up; ysyxSoC would force an ISS/memory-map refactor and likely require re-debugging AXI after cache/pipeline timing changes.
+- I-cache milestone is implemented on the existing non-pipelined AXI baseline:
+  - `core/rtl/npc_icache.v`: 2 direct-mapped flip-flop lines, 16-byte line size, AXI 4-beat fills, `fence.i` invalidation, AMAT counters.
+  - Fetch now waits for `resp_fetch_valid`; data load/store remain baseline zero-latency for this single-cycle core.
+  - Verified RTL Release build, CTest, and non-UART ISA difftest workloads.
+- Before changing pipeline structure, optionally run longer AM CoreMark with the cache enabled; RT-Thread AM scripted shell difftest already passes.
+- Refactor into the five-stage pipeline only after I-cache is stable:
+  - IF/ID/EX/MEM/WB split.
+  - Forwarding, load-use stalls, branch/jump flushes, precise exceptions.
+  - Rerun difftest after each sub-step.
 - Before relying on CLINT/UART/input-heavy workloads for pipeline validation, refactor difftest to replay DUT-observed peripheral inputs into REF; see `notes/difftest-design.md`.
-- If UART must be modeled in RTL simulation, implement it in the external AXI simulation memory/MMIO model, not in the core; generally ignore RTL UART writes during difftest and trust the emulator output if architectural execution matches.
+- Keep UART outside the processor core; if needed in RTL simulation, implement it in the external AXI simulation memory/MMIO model.
 
 ## Deferred
 
+- ysyxSoC integration after pipelined core stabilization:
+  - Refactor ISS/memory model to represent multiple memory devices instead of one flat RAM.
+  - Model ysyxSoC memory map and real AXI devices.
+  - Memory properties: MROM `l-`, flash `l-`, PSRAM `-w`; all are processor-readable.
+  - Add DPI-C hooks for core/RTL reads from MROM and flash.
+  - Add PSRAM processor write path.
+  - Build VCD/AXI waveform analysis tooling, likely as a project skill, before deep real-peripheral debugging.
 - GoogleTest migration, watchpoints, in-memory snapshots, Spike adapter, real AM interrupts, multi-core.
 - Advanced branch prediction, clock gating, cache size exploration.
 - Full RTL checkpoint save/restore.
-
-## Deferred
-
-- GoogleTest migration, watchpoints, in-memory snapshots, Spike adapter, real AM interrupts, multi-core.
-- Advanced branch prediction, clock gating, cache size exploration.
 
 ## Recent notes
 
@@ -114,3 +125,10 @@
   - The current AXI/i-cache work needs a stable baseline first.
   - Correct behavior requires DUT-observed peripheral input replay into REF, not instruction-count-based CLINT ticking.
   - Detailed design and refactor points are recorded in `notes/difftest-design.md` under external/peripheral input handling.
+
+- Implemented the I-cache milestone:
+  - Added waitable fetch response in `npc_single_cycle.v` and a `fence_i_commit` pulse for cache invalidation.
+  - Added `npc_icache.v` with two 16-byte direct-mapped lines, 4-beat AXI fill, fill-fault handling, flush, and counters.
+  - Wired `npc_core.v` through I-cache to `npc_axi_master.v`; fetch fills are stateful bursts, while data accesses remain single-cycle for the current baseline.
+  - Updated Verilator AXI memory responders for read bursts and kept simple zero-latency data access behavior.
+  - Verified with RTL Release build, CTest, non-UART ISA difftest workloads, and RT-Thread AM scripted shell difftest (`567442` matched instructions).

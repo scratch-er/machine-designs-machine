@@ -288,33 +288,26 @@ On every IF cycle:
 
 Cache fill:
 
-- `ARADDR = {pc[31:5], 5'b0}` (line-aligned).
+- `ARADDR = {pc[31:4], 4'b0}` (16-byte line-aligned; keeps index bit `pc[4]`).
 - `ARLEN = 3` (four beats).
 - `ARSIZE = 2` (four bytes per beat).
 - `ARBURST = 2'b01` (INCR).
 - As each `RVALID` beat arrives, write it to the appropriate word of the selected line.
-- On `RLAST`, set `valid` and `tag`.
+- On `RLAST`, set `valid` and `tag` when no beat fault occurred.
+- On fill fault, return an instruction access fault and leave the target line invalid.
 - If the branch target changes while a fill is in flight, the fill completes but the fetched line is simply not used unless the new PC falls inside it.
 
-`fence.i` clears all `valid` bits.
+`fence.i` clears all `valid` bits through a one-cycle retire pulse from the single-cycle core.
 
 ### AXI4 Master
 
-The core exposes one AXI4 master port shared by IF (instruction fills) and MEM (loads/stores). The master accepts one transaction at a time and arbitrates between IF and MEM.
+The current I-cache milestone keeps the non-pipelined core's data path simple while adding stateful instruction fills:
 
-Arbitration:
+- IF misses use a stateful one-in-flight AXI read burst (`ID=0`, `ARLEN=3`, `ARSIZE=2`).
+- Data loads/stores still use the baseline single-beat, zero-latency simulation timing (`ID=1`) so the existing execute phase can consume load/store responses without adding a data-memory wait state.
+- Fetch requests are only launched when the bridge is idle and no data request is active, so data accesses keep priority over new instruction fills.
 
-- MEM requests have priority over IF requests. This prevents a data access from being indefinitely delayed by instruction misses.
-- Once a transaction starts, it runs to completion; no preemption.
-
-State machine states:
-
-- `IDLE`
-- `IF_FILL_ADDR` / `IF_FILL_DATA` — read burst for I-cache.
-- `MEM_R_ADDR` / `MEM_R_DATA` — single-beat read for load.
-- `MEM_W_ADDR` / `MEM_W_DATA` / `MEM_W_RESP` — single-beat write for store.
-
-Load/store request signals come from EX/MEM; the address, size, and write data are latched when the transaction starts.
+The later pipeline milestone should convert data memory to the same waitable transaction style.
 
 ### Data Memory Alignment and Byte Enables
 

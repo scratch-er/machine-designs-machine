@@ -10,9 +10,10 @@ module npc_single_cycle (
     input              clock,
     input              reset,
 
-    // Instruction fetch interface (combinational read)
+    // Instruction fetch interface
     output             req_fetch_valid,
     output     [31:0]  req_fetch_addr,
+    input              resp_fetch_valid,
     input      [31:0]  resp_fetch_inst,
     input              resp_fetch_fault,
     input              resp_fetch_misaligned,
@@ -42,6 +43,7 @@ module npc_single_cycle (
     output reg         commit_exception,
     output reg [31:0]  commit_cause,
     output reg [31:0]  commit_next_pc,
+    output             fence_i_commit,
 
     // Debug ports
     output     [31:0]  debug_pc,
@@ -440,6 +442,7 @@ module npc_single_cycle (
     reg        commit_exception_r;
     reg [31:0] commit_cause_r;
     reg [31:0] commit_next_pc_r;
+    reg        fence_i_commit_r;
 
     always @(posedge clock or posedge reset) begin
         if (reset) begin
@@ -451,13 +454,17 @@ module npc_single_cycle (
             fetch_fault_reg      <= 1'b0;
             fetch_misaligned_reg <= 1'b0;
             commit_valid_r       <= 1'b0;
+            fence_i_commit_r     <= 1'b0;
         end else if (!halted && !execute_phase) begin
-            inst_reg             <= resp_fetch_inst;
-            fetch_pc_reg         <= pc;
-            fetch_fault_reg      <= resp_fetch_fault;
-            fetch_misaligned_reg <= resp_fetch_misaligned;
-            execute_phase        <= 1'b1;
             commit_valid_r       <= 1'b0;
+            fence_i_commit_r     <= 1'b0;
+            if (resp_fetch_valid) begin
+                inst_reg             <= resp_fetch_inst;
+                fetch_pc_reg         <= pc;
+                fetch_fault_reg      <= resp_fetch_fault;
+                fetch_misaligned_reg <= resp_fetch_misaligned;
+                execute_phase        <= 1'b1;
+            end
         end else if (!halted) begin
             // Capture the instruction that retires this cycle. The PC register
             // will be updated to next_pc, so we must record the fetched PC here
@@ -470,6 +477,7 @@ module npc_single_cycle (
             commit_exception_r <= exc_take;
             commit_cause_r     <= exc_cause;
             commit_next_pc_r   <= next_pc;
+            fence_i_commit_r   <= ctrl_fence_i && !exc_take;
 
             execute_phase <= 1'b0;
             if (exc_take) begin
@@ -480,6 +488,7 @@ module npc_single_cycle (
             end
         end else begin
             commit_valid_r <= 1'b0;
+            fence_i_commit_r <= 1'b0;
         end
     end
 
@@ -494,6 +503,7 @@ module npc_single_cycle (
     assign commit_exception  = commit_exception_r;
     assign commit_cause      = commit_cause_r;
     assign commit_next_pc    = commit_next_pc_r;
+    assign fence_i_commit    = fence_i_commit_r;
 
     //==========================================================================
     // Debug outputs
